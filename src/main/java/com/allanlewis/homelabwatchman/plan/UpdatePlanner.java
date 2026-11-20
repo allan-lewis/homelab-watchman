@@ -70,6 +70,18 @@ public class UpdatePlanner {
                     null, null, newerTag.get()));
         }
 
+        // currentDigest() == null means the file never pinned a digest at
+        // all (e.g. a VERSION_BUMP merge only ever writes "identifier:tag",
+        // no digest) - there's nothing to "refresh" in that case. Without
+        // this guard, any resolved digest trivially satisfies
+        // !digest.equals(null), so this falsely fired on every single run
+        // for an unpinned tag regardless of whether anything upstream
+        // actually changed - confirmed live: ghcr.io/gethomepage/homepage's
+        // real digest for v2.8.0 was stable across repeated checks.
+        if (candidate.currentDigest() == null) {
+            return Optional.empty();
+        }
+
         Optional<String> latestDigest = ociRegistryClient.resolveDigest(candidate.identifier(), candidate.currentValue());
         if (latestDigest.isPresent() && !latestDigest.get().equals(candidate.currentDigest())) {
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.DIGEST_REFRESH,
