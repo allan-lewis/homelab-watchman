@@ -12,7 +12,8 @@ public record ProposedUpdate(
         UpdateKind kind,
         String oldText,
         String newText,
-        String releaseNotesUrl
+        String releaseNotesUrl,
+        String releaseNotes
 ) {
 
     public Path file() {

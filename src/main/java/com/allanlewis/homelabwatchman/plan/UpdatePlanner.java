@@ -64,8 +64,12 @@ public class UpdatePlanner {
                 .filter(t -> versionComparator.compare(t, candidate.currentValue()) > 0);
 
         if (newerTag.isPresent()) {
+            // No reliable way to map an arbitrary OCI image (e.g.
+            // ghcr.io/linuxserver/sonarr) to its upstream changelog in this
+            // MVP, so releaseNotesUrl/releaseNotes stay null here - the AI
+            // prompt is written to handle that honestly rather than guess.
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.VERSION_BUMP,
-                    describeCurrent(candidate), candidate.identifier() + ":" + newerTag.get(), null));
+                    describeCurrent(candidate), candidate.identifier() + ":" + newerTag.get(), null, null));
         }
 
         Optional<String> latestDigest = ociRegistryClient.resolveDigest(candidate.identifier(), candidate.currentValue());
@@ -73,7 +77,7 @@ public class UpdatePlanner {
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.DIGEST_REFRESH,
                     describeCurrent(candidate),
                     candidate.identifier() + ":" + candidate.currentValue() + "@" + latestDigest.get(),
-                    null));
+                    null, null));
         }
 
         return Optional.empty();
@@ -115,9 +119,9 @@ public class UpdatePlanner {
     private Optional<ProposedUpdate> planGitHubBackedVersion(CandidateDependency candidate) {
         String[] ownerRepo = candidate.identifier().split("/", 2);
 
-        return gitHubReleaseClient.latestReleaseTag(ownerRepo[0], ownerRepo[1])
-                .filter(tag -> !tag.equals(candidate.currentValue()))
-                .map(tag -> new ProposedUpdate(candidate, UpdateKind.VERSION_BUMP,
-                        describeCurrent(candidate), tag, null));
+        return gitHubReleaseClient.latestRelease(ownerRepo[0], ownerRepo[1])
+                .filter(release -> !release.tag().equals(candidate.currentValue()))
+                .map(release -> new ProposedUpdate(candidate, UpdateKind.VERSION_BUMP,
+                        describeCurrent(candidate), release.tag(), release.url(), release.notes()));
     }
 }

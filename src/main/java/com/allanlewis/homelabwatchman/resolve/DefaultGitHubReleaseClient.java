@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * Latest release/tag for a GitHub repository, via /releases/latest (which
+ * Latest release for a GitHub repository, via /releases/latest (which
  * already excludes drafts and prereleases).
  *
  * Note: not every project's release tag matches the bare version string
@@ -27,7 +27,7 @@ public class DefaultGitHubReleaseClient implements GitHubReleaseClient {
     }
 
     @Override
-    public Optional<String> latestReleaseTag(String owner, String repo) {
+    public Optional<Release> latestRelease(String owner, String repo) {
         String url = "https://api.github.com/repos/" + owner + "/" + repo + "/releases/latest";
 
         ReleaseResponse response = restClient.get()
@@ -46,11 +46,15 @@ public class DefaultGitHubReleaseClient implements GitHubReleaseClient {
             return Optional.empty();
         }
 
-        String tag = response.tagName();
-        int lastSlash = tag.lastIndexOf('/');
-        return Optional.of(lastSlash == -1 ? tag : tag.substring(lastSlash + 1));
+        int lastSlash = response.tagName().lastIndexOf('/');
+        String tag = lastSlash == -1 ? response.tagName() : response.tagName().substring(lastSlash + 1);
+
+        return Optional.of(new Release(tag, response.body(), response.htmlUrl()));
     }
 
-    private record ReleaseResponse(@JsonProperty("tag_name") String tagName) {
+    private record ReleaseResponse(
+            @JsonProperty("tag_name") String tagName,
+            String body,
+            @JsonProperty("html_url") String htmlUrl) {
     }
 }

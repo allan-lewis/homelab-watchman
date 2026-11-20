@@ -21,8 +21,5 @@ homelab:
     github:
       token: ${HOMELAB_WATCHMAN_GITHUB_TOKEN:}
       repository: allan-lewis/allans-home-lab
-    ai:
-      provider: anthropic
-      model: claude-haiku-4-5
     metrics:
       output-path: ./metrics/homelab-watchman.prom

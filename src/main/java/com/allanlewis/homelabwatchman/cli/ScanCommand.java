@@ -1,5 +1,7 @@
 package com.allanlewis.homelabwatchman.cli;
 
+import com.allanlewis.homelabwatchman.ai.PrText;
+import com.allanlewis.homelabwatchman.ai.PrTextGenerator;
 import com.allanlewis.homelabwatchman.metrics.ScanMetricsRecorder;
 import com.allanlewis.homelabwatchman.persist.DependencyStateWriter;
 import com.allanlewis.homelabwatchman.persist.ScanRun;
@@ -37,6 +39,7 @@ public class ScanCommand implements CommandLineRunner {
     private final ScanRunRepository scanRunRepository;
     private final DependencyStateWriter dependencyStateWriter;
     private final ScanMetricsRecorder metricsRecorder;
+    private final PrTextGenerator prTextGenerator;
     private final Path metricsOutputPath;
 
     public ScanCommand(
@@ -45,12 +48,14 @@ public class ScanCommand implements CommandLineRunner {
             ScanRunRepository scanRunRepository,
             DependencyStateWriter dependencyStateWriter,
             ScanMetricsRecorder metricsRecorder,
+            PrTextGenerator prTextGenerator,
             @Value("${homelab.watchman.metrics.output-path}") String metricsOutputPath) {
         this.extractors = extractors;
         this.updatePlanner = updatePlanner;
         this.scanRunRepository = scanRunRepository;
         this.dependencyStateWriter = dependencyStateWriter;
         this.metricsRecorder = metricsRecorder;
+        this.prTextGenerator = prTextGenerator;
         this.metricsOutputPath = Path.of(metricsOutputPath);
     }
 
@@ -88,8 +93,14 @@ public class ScanCommand implements CommandLineRunner {
         System.out.println();
         System.out.printf("%d version bump(s), %d digest refresh(es), %d up to date%n",
                 versionBumps, digestRefreshes, noOps);
-        if (!updates.isEmpty() && !apply) {
-            System.out.println("--apply is not yet implemented.");
+
+        if (!updates.isEmpty()) {
+            if (apply) {
+                draftPrText(updates);
+            } else {
+                System.out.println("Pass --apply to draft PR text for these updates "
+                        + "(opening the PRs themselves is not yet implemented).");
+            }
         }
 
         dependencyStateWriter.save(candidates, byCandidate);
@@ -104,6 +115,18 @@ public class ScanCommand implements CommandLineRunner {
         metricsRecorder.recordCandidatesByKind(countsByKind);
         metricsRecorder.recordPrsOpened(0);
         metricsRecorder.writeTo(metricsOutputPath);
+    }
+
+    private void draftPrText(List<ProposedUpdate> updates) {
+        System.out.println();
+        System.out.println("Drafting PR text (opening PRs is not yet implemented):");
+        for (ProposedUpdate update : updates) {
+            PrText text = prTextGenerator.generate(update);
+            System.out.println();
+            System.out.println(update.candidate().identifier() + ":");
+            System.out.println("  title: " + text.title());
+            System.out.println("  body:  " + text.body());
+        }
     }
 
     private void printLine(CandidateDependency candidate, ProposedUpdate update, boolean verbose) {

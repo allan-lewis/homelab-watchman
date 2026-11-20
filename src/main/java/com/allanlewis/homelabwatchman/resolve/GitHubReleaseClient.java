@@ -3,11 +3,16 @@ package com.allanlewis.homelabwatchman.resolve;
 import java.util.Optional;
 
 /**
- * Looks up the latest release/tag for a GitHub repository. Used for
+ * Looks up the latest release for a GitHub repository. Used for
  * dependencies that aren't OCI images (immich-app/immich,
- * goauthentik/authentik).
+ * goauthentik/authentik) - the only ones with a reliably fetchable
+ * changelog in this MVP.
  */
 public interface GitHubReleaseClient {
 
-    Optional<String> latestReleaseTag(String owner, String repo);
+    Optional<Release> latestRelease(String owner, String repo);
+
+    /** notes/url come straight from the release body/html_url, not fabricated. */
+    record Release(String tag, String notes, String url) {
+    }
 }
