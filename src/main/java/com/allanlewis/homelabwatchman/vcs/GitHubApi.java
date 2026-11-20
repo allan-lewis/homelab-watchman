@@ -1,7 +1,6 @@
 package com.allanlewis.homelabwatchman.vcs;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
@@ -176,8 +175,17 @@ public class GitHubApi {
     /** Merged PRs we created, found via the given label - independent of whatever's currently pending. */
     public List<Long> findMergedPrNumbers(String label) {
         String query = "repo:" + owner + "/" + repo + " is:pull-request is:merged label:" + label;
+
+        // Not uri(String): that re-parses a hand-encoded string through
+        // UriComponentsBuilder, which treats "+" (URLEncoder's space
+        // encoding) as a literal character rather than space - GitHub then
+        // sees one run-on token instead of separate qualifiers. The
+        // structured builder encodes the query param value correctly.
         SearchResponse response = restClient.get()
-                .uri("https://api.github.com/search/issues?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8))
+                .uri(uriBuilder -> uriBuilder
+                        .scheme("https").host("api.github.com").path("/search/issues")
+                        .queryParam("q", query)
+                        .build())
                 .headers(this::authHeaders)
                 .retrieve()
                 .body(SearchResponse.class);
