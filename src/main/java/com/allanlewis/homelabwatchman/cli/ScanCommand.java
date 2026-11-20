@@ -11,6 +11,7 @@ import com.allanlewis.homelabwatchman.plan.UpdateKind;
 import com.allanlewis.homelabwatchman.plan.UpdatePlanner;
 import com.allanlewis.homelabwatchman.scan.CandidateDependency;
 import com.allanlewis.homelabwatchman.scan.DependencyExtractor;
+import com.allanlewis.homelabwatchman.scan.GitCheckoutGuard;
 import com.allanlewis.homelabwatchman.vcs.PullRequestClient;
 import com.allanlewis.homelabwatchman.vcs.PullRequestClient.PrOutcome;
 import java.nio.file.Path;
@@ -40,6 +41,7 @@ import org.springframework.stereotype.Component;
 public class ScanCommand implements CommandLineRunner {
 
     private final List<DependencyExtractor> extractors;
+    private final GitCheckoutGuard gitCheckoutGuard;
     private final UpdatePlanner updatePlanner;
     private final ScanRunRepository scanRunRepository;
     private final DependencyStateWriter dependencyStateWriter;
@@ -50,6 +52,7 @@ public class ScanCommand implements CommandLineRunner {
 
     public ScanCommand(
             List<DependencyExtractor> extractors,
+            GitCheckoutGuard gitCheckoutGuard,
             UpdatePlanner updatePlanner,
             ScanRunRepository scanRunRepository,
             DependencyStateWriter dependencyStateWriter,
@@ -58,6 +61,7 @@ public class ScanCommand implements CommandLineRunner {
             PullRequestClient pullRequestClient,
             @Value("${homelab.watchman.metrics.output-path}") String metricsOutputPath) {
         this.extractors = extractors;
+        this.gitCheckoutGuard = gitCheckoutGuard;
         this.updatePlanner = updatePlanner;
         this.scanRunRepository = scanRunRepository;
         this.dependencyStateWriter = dependencyStateWriter;
@@ -79,6 +83,8 @@ public class ScanCommand implements CommandLineRunner {
         boolean apply = argList.contains("--apply");
         boolean verbose = argList.contains("-v") || argList.contains("--verbose");
         String only = parseOptionalArg(args, "--only");
+
+        gitCheckoutGuard.verify(repoRoot);
 
         ScanRun scanRun = new ScanRun();
         scanRun.setStartedAt(Instant.now());
