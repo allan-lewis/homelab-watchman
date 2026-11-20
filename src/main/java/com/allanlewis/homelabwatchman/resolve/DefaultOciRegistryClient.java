@@ -101,9 +101,50 @@ public class DefaultOciRegistryClient implements OciRegistryClient {
                     h.setBearerAuth(token);
                     h.setAccept(MANIFEST_ACCEPT);
                 })
-                .exchange((request, response) -> response.getStatusCode().is2xxSuccessful()
-                        ? Optional.ofNullable(response.getHeaders().getFirst("Docker-Content-Digest"))
-                        : Optional.empty());
+                .exchange((request, response) -> {
+                    if (!response.getStatusCode().is2xxSuccessful()) {
+                        return Optional.<String>empty();
+                    }
+                    String indexDigest = response.getHeaders().getFirst("Docker-Content-Digest");
+                    ManifestOrIndex body = response.bodyTo(ManifestOrIndex.class);
+                    return Optional.of(amd64Digest(body).orElse(indexDigest));
+                });
+    }
+
+    /**
+     * Multi-arch tags resolve to a top-level INDEX whose own digest churns
+     * independently of whether the image content actually changed - e.g.
+     * a provenance/SBOM attestation manifest for some other platform gets
+     * regenerated, or the manifest list simply gets re-serialized, and the
+     * index digest changes even though the linux/amd64 manifest (the only
+     * one this homelab's x86 hosts ever actually run) is byte-identical.
+     * Confirmed live: Renovate's own pinned digest for vaultwarden/server
+     * and triliumnext/trilium exactly matched the linux/amd64 child
+     * manifest's digest inside the index, not the index's own digest -
+     * this homelab-watchman was comparing against the latter, which is
+     * why it kept seeing "changes" Renovate correctly ignored. A plain
+     * (non-index) manifest response has no "manifests" array at all, so
+     * this is a no-op for single-arch images.
+     */
+    private Optional<String> amd64Digest(ManifestOrIndex body) {
+        if (body == null || body.manifests() == null) {
+            return Optional.empty();
+        }
+        return body.manifests().stream()
+                .filter(m -> m.platform() != null
+                        && "linux".equals(m.platform().os())
+                        && "amd64".equals(m.platform().architecture()))
+                .map(ManifestEntry::digest)
+                .findFirst();
+    }
+
+    private record ManifestOrIndex(List<ManifestEntry> manifests) {
+    }
+
+    private record ManifestEntry(String digest, Platform platform) {
+    }
+
+    private record Platform(String os, String architecture) {
     }
 
     private String fetchToken(Registry registry) {
