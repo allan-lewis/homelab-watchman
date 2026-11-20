@@ -22,6 +22,16 @@ public interface PullRequestClient {
 
     PrOutcome apply(Path repoRoot, ProposedUpdate update, PrText text);
 
+    /**
+     * Deletes the head branch for any of our merged PRs whose branch still
+     * exists - independent of what's currently pending, since a merged
+     * dependency's identifier won't appear in this run's candidates at
+     * all. Matches Renovate's own behavior: this repo's "automatically
+     * delete head branches" setting is off, so Renovate must be doing the
+     * same thing itself. Returns the number of branches deleted.
+     */
+    int cleanupMergedBranches();
+
     record PrOutcome(Status status, String prUrl) {
 
         public enum Status {

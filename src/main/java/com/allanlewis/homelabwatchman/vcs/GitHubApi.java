@@ -1,6 +1,7 @@
 package com.allanlewis.homelabwatchman.vcs;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
@@ -172,6 +173,45 @@ public class GitHubApi {
                 .toBodilessEntity();
     }
 
+    /** Merged PRs we created, found via the given label - independent of whatever's currently pending. */
+    public List<Long> findMergedPrNumbers(String label) {
+        String query = "repo:" + owner + "/" + repo + " is:pull-request is:merged label:" + label;
+        SearchResponse response = restClient.get()
+                .uri("https://api.github.com/search/issues?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8))
+                .headers(this::authHeaders)
+                .retrieve()
+                .body(SearchResponse.class);
+        return response == null || response.items() == null
+                ? List.of()
+                : response.items().stream().map(SearchItem::number).toList();
+    }
+
+    public PullRequest getPr(long number) {
+        return restClient.get()
+                .uri(api("/pulls/" + number))
+                .headers(this::authHeaders)
+                .retrieve()
+                .body(PullRequest.class);
+    }
+
+    /** @return true if the branch existed and was deleted, false if it was already gone. */
+    public boolean deleteBranchIfExists(String branch) {
+        boolean exists = restClient.get()
+                .uri(api("/git/ref/heads/" + branch))
+                .headers(this::authHeaders)
+                .exchange((req, resp) -> resp.getStatusCode().is2xxSuccessful());
+
+        if (exists) {
+            restClient.delete()
+                    .uri(api("/git/refs/heads/" + branch))
+                    .headers(this::authHeaders)
+                    .retrieve()
+                    .toBodilessEntity();
+        }
+
+        return exists;
+    }
+
     private String api(String path) {
         return "https://api.github.com/repos/" + owner + "/" + repo + path;
     }
@@ -192,7 +232,26 @@ public class GitHubApi {
     public record FileContent(String content, String sha) {
     }
 
-    public record PullRequest(long number, String state, String title, @JsonProperty("html_url") String htmlUrl) {
+    public record PullRequest(
+            long number,
+            String state,
+            String title,
+            @JsonProperty("html_url") String htmlUrl,
+            @JsonProperty("merged_at") String mergedAt,
+            Head head) {
+
+        public boolean isMerged() {
+            return mergedAt != null;
+        }
+
+        public record Head(String ref) {
+        }
+    }
+
+    private record SearchResponse(List<SearchItem> items) {
+    }
+
+    private record SearchItem(long number) {
     }
 
     private record RefResponse(RefObject object) {

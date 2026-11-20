@@ -107,15 +107,26 @@ public class ScanCommand implements CommandLineRunner {
         Map<CandidateDependency, PrOutcome> prOutcomes = Map.of();
         int prsOpened = 0;
 
-        if (!updates.isEmpty()) {
-            if (apply) {
+        if (apply) {
+            try {
+                int branchesDeleted = pullRequestClient.cleanupMergedBranches();
+                if (branchesDeleted > 0) {
+                    System.out.println();
+                    System.out.println("Deleted " + branchesDeleted + " merged PR branch(es).");
+                }
+            } catch (RuntimeException e) {
+                System.out.println();
+                System.out.println("Merged-branch cleanup FAILED - " + e.getMessage());
+            }
+
+            if (!updates.isEmpty()) {
                 prOutcomes = reconcileAll(repoRoot, updates);
                 prsOpened = (int) prOutcomes.values().stream()
                         .filter(o -> o.status() == PrOutcome.Status.CREATED)
                         .count();
-            } else {
-                System.out.println("Pass --apply to draft PR text and open/update PRs for these updates.");
             }
+        } else if (!updates.isEmpty()) {
+            System.out.println("Pass --apply to draft PR text and open/update PRs for these updates.");
         }
 
         dependencyStateWriter.save(candidates, byCandidate, prOutcomes);

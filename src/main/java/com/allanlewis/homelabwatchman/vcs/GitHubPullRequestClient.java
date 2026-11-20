@@ -72,6 +72,18 @@ public class GitHubPullRequestClient implements PullRequestClient {
         return outcome;
     }
 
+    @Override
+    public int cleanupMergedBranches() {
+        int deleted = 0;
+        for (long number : api.findMergedPrNumbers(LABEL)) {
+            String branch = api.getPr(number).head().ref();
+            if (api.deleteBranchIfExists(branch)) {
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
     private void resetBranchToBaseAndApplyEdit(String branch, String relativePath, ProposedUpdate update, PrText text) {
         String baseSha = api.getBranchSha(baseBranch);
         api.createOrResetBranch(branch, baseSha);
@@ -103,18 +115,19 @@ public class GitHubPullRequestClient implements PullRequestClient {
     }
 
     /**
-     * GitHub's "closed" state covers both merged and rejected PRs, but
-     * that ambiguity doesn't matter here: if this exact target had
-     * actually been merged, the file would already show it and
-     * UpdatePlanner wouldn't be proposing it again at all. So a closed PR
-     * whose title names our exact target, while we're still proposing
-     * that target, can only mean it was closed without merging - a human
-     * rejection to respect, not resurrect. A later, different target
-     * (newer version) is unaffected, since its title won't match.
+     * GitHub's "closed" state covers both merged and rejected PRs - check
+     * mergedAt directly rather than inferring from file content. Inferring
+     * ("if merged, the file would already show it, so it can't still be
+     * proposed") breaks the moment the local checkout lags behind the
+     * remote base branch at all, which is a real, not-rare case: it's
+     * exactly what happened testing this against a checkout sitting on a
+     * feature branch a couple commits behind main.
      */
     private boolean wasPreviouslyRejected(String branch, ProposedUpdate update) {
         List<GitHubApi.PullRequest> closed = api.findPrsByBranch(branch, "closed");
-        return closed.stream().anyMatch(pr -> pr.title() != null && pr.title().contains(update.newBareVersion()));
+        return closed.stream()
+                .filter(pr -> !pr.isMerged())
+                .anyMatch(pr -> pr.title() != null && pr.title().contains(update.newBareVersion()));
     }
 
     private String branchName(String identifier, UpdateKind kind) {
