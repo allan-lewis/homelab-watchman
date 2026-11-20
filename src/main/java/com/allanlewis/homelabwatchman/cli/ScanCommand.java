@@ -125,6 +125,8 @@ public class ScanCommand implements CommandLineRunner {
                 System.out.println("Merged-branch cleanup FAILED - " + e.getMessage());
             }
 
+            closeStalePrsForNoOpCandidates(candidates, byCandidate);
+
             if (!updates.isEmpty()) {
                 prOutcomes = reconcileAll(repoRoot, updates);
                 prsOpened = (int) prOutcomes.values().stream()
@@ -147,6 +149,26 @@ public class ScanCommand implements CommandLineRunner {
         metricsRecorder.recordCandidatesByKind(countsByKind);
         metricsRecorder.recordPrsOpened(prsOpened);
         metricsRecorder.writeTo(metricsOutputPath);
+    }
+
+    private void closeStalePrsForNoOpCandidates(
+            List<CandidateDependency> candidates, Map<CandidateDependency, ProposedUpdate> byCandidate) {
+        for (CandidateDependency candidate : candidates) {
+            if (byCandidate.containsKey(candidate)) {
+                continue;
+            }
+            try {
+                int closed = pullRequestClient.closeStalePrs(candidate);
+                if (closed > 0) {
+                    System.out.println();
+                    System.out.println(candidate.identifier() + ": closed " + closed
+                            + " stale PR(s) - already up to date.");
+                }
+            } catch (RuntimeException e) {
+                System.out.println();
+                System.out.println(candidate.identifier() + ": stale-PR cleanup FAILED - " + e.getMessage());
+            }
+        }
     }
 
     private Map<CandidateDependency, PrOutcome> reconcileAll(Path repoRoot, List<ProposedUpdate> updates) {

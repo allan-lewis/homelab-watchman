@@ -2,6 +2,7 @@ package com.allanlewis.homelabwatchman.vcs;
 
 import com.allanlewis.homelabwatchman.ai.PrText;
 import com.allanlewis.homelabwatchman.plan.ProposedUpdate;
+import com.allanlewis.homelabwatchman.scan.CandidateDependency;
 import java.nio.file.Path;
 
 /**
@@ -31,6 +32,18 @@ public interface PullRequestClient {
      * same thing itself. Returns the number of branches deleted.
      */
     int cleanupMergedBranches();
+
+    /**
+     * A candidate with no pending update at all (plan() produced nothing
+     * for it this run) means UpdatePlanner looked and found the file
+     * already current - so any still-open PR for either branch kind on
+     * this identifier is stale by definition, no matter how it got that
+     * way (merged by a different path, hand-edited, etc. - exactly what
+     * happened to twingate/connector: main moved on independently of the
+     * open PR proposing the same bump). Closes any found, with a comment
+     * explaining why. Returns the number closed.
+     */
+    int closeStalePrs(CandidateDependency candidate);
 
     record PrOutcome(Status status, String prUrl) {
 

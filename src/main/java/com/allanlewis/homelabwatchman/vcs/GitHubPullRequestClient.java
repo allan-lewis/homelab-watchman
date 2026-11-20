@@ -3,6 +3,7 @@ package com.allanlewis.homelabwatchman.vcs;
 import com.allanlewis.homelabwatchman.ai.PrText;
 import com.allanlewis.homelabwatchman.plan.ProposedUpdate;
 import com.allanlewis.homelabwatchman.plan.UpdateKind;
+import com.allanlewis.homelabwatchman.scan.CandidateDependency;
 import com.allanlewis.homelabwatchman.vcs.PullRequestClient.PrOutcome.Status;
 import java.nio.file.Path;
 import java.util.List;
@@ -82,6 +83,22 @@ public class GitHubPullRequestClient implements PullRequestClient {
             }
         }
         return deleted;
+    }
+
+    @Override
+    public int closeStalePrs(CandidateDependency candidate) {
+        int closed = 0;
+        for (UpdateKind kind : UpdateKind.values()) {
+            String branch = branchName(candidate.identifier(), kind);
+            Optional<GitHubApi.PullRequest> openPr = api.findOpenPrByBranch(branch);
+            if (openPr.isPresent()) {
+                api.addComment(openPr.get().number(),
+                        "Closing: " + candidate.identifier() + " is already up to date on " + baseBranch + ".");
+                api.closePr(openPr.get().number());
+                closed++;
+            }
+        }
+        return closed;
     }
 
     private void resetBranchToBaseAndApplyEdit(String branch, String relativePath, ProposedUpdate update, PrText text) {
