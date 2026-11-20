@@ -38,6 +38,18 @@ public record ProposedUpdate(
     }
 
     /**
+     * First 7 hex chars of the new digest for a DIGEST_REFRESH, matching
+     * Renovate's own "Docker digest to e0c5d45"-style abbreviation - only
+     * meaningful when kind() is DIGEST_REFRESH, since that's the only case
+     * newText() carries an "@sha256:..." suffix at all.
+     */
+    public String newDigestShort() {
+        int at = newText.indexOf("@sha256:");
+        String digest = newText.substring(at + "@sha256:".length());
+        return digest.substring(0, Math.min(7, digest.length()));
+    }
+
+    /**
      * mergeFunction (a, b) -> a: candidates compare equal only when
      * identifier/file/value/digest are all identical (e.g. twingate's
      * duplicated container block), so either side is an identical update.

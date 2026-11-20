@@ -25,9 +25,10 @@ public class ChatClientPrTextGenerator implements PrTextGenerator {
               etc. unless the release notes actually say so.
             - Title, at most 72 characters:
               - VERSION_BUMP: "chore(deps): bump <name> from <old> to <new>"
-              - DIGEST_REFRESH: "chore(deps): refresh <name> image digest
-                (<version> unchanged)" - never phrase a digest refresh as
-                "from X to X", since the version didn't change.
+              - DIGEST_REFRESH: "chore(deps): update <name> digest to
+                <short digest>" using the short digest given below - never
+                phrase a digest refresh as "from X to X", since the
+                version/tag didn't change, only the digest did.
             - Body: 2-4 plain sentences. State what changed, note the risk
               implied by the update kind (digest refresh = routine rebuild
               of the same version, low risk; version bump = a real version
@@ -57,6 +58,7 @@ public class ChatClientPrTextGenerator implements PrTextGenerator {
         prompt.append("New: ").append(update.newText()).append('\n');
 
         if (update.kind() == UpdateKind.DIGEST_REFRESH) {
+            prompt.append("Short digest: ").append(update.newDigestShort()).append('\n');
             prompt.append("Note: same version/tag, upstream rebuilt the image. "
                     + "No release notes apply.\n");
         } else if (update.releaseNotes() != null && !update.releaseNotes().isBlank()) {
