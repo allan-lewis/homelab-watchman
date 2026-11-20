@@ -31,8 +31,6 @@ dependencies {
 
     implementation("io.micrometer:micrometer-registry-prometheus")
 
-    implementation("org.eclipse.jgit:org.eclipse.jgit:7.8.1.202611041320-r")
-
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

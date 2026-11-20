@@ -1,0 +1,233 @@
+package com.allanlewis.homelabwatchman.vcs;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.List;
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpHeaders;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
+
+/**
+ * Thin wrapper over the GitHub REST API operations vcs needs. Deliberately
+ * API-only, no local git checkout: avoids ever touching the real local
+ * clone (which has its own in-progress branch/commits), and PUTting file
+ * contents via the Contents API creates the commit server-side in one
+ * call, with no local git state at all.
+ */
+@Component
+public class GitHubApi {
+
+    private final RestClient restClient = RestClient.create();
+    private final String token;
+    private final String owner;
+    private final String repo;
+
+    public GitHubApi(
+            @Value("${homelab.watchman.github.token}") String token,
+            @Value("${homelab.watchman.github.repository}") String repository) {
+        this.token = token;
+        String[] parts = repository.split("/", 2);
+        this.owner = parts[0];
+        this.repo = parts[1];
+    }
+
+    public String getBranchSha(String branch) {
+        return restClient.get()
+                .uri(api("/git/ref/heads/" + branch))
+                .headers(this::authHeaders)
+                .retrieve()
+                .body(RefResponse.class)
+                .object()
+                .sha();
+    }
+
+    public void createOrResetBranch(String branch, String sha) {
+        boolean exists = restClient.get()
+                .uri(api("/git/ref/heads/" + branch))
+                .headers(this::authHeaders)
+                .exchange((req, resp) -> resp.getStatusCode().is2xxSuccessful());
+
+        if (exists) {
+            restClient.patch()
+                    .uri(api("/git/refs/heads/" + branch))
+                    .headers(this::authHeaders)
+                    .body(new UpdateRefRequest(sha, true))
+                    .retrieve()
+                    .toBodilessEntity();
+        } else {
+            restClient.post()
+                    .uri(api("/git/refs"))
+                    .headers(this::authHeaders)
+                    .body(new CreateRefRequest("refs/heads/" + branch, sha))
+                    .retrieve()
+                    .toBodilessEntity();
+        }
+    }
+
+    public Optional<FileContent> getFileContent(String path, String branch) {
+        return restClient.get()
+                .uri(api("/contents/" + path + "?ref=" + branch))
+                .headers(this::authHeaders)
+                .exchange((req, resp) -> {
+                    if (!resp.getStatusCode().is2xxSuccessful()) {
+                        return Optional.empty();
+                    }
+                    ContentResponse content = resp.bodyTo(ContentResponse.class);
+                    return Optional.of(new FileContent(decode(content.content()), content.sha()));
+                });
+    }
+
+    public void putFileContent(String path, String branch, String newContent, String existingBlobSha, String commitMessage) {
+        restClient.put()
+                .uri(api("/contents/" + path))
+                .headers(this::authHeaders)
+                .body(new PutContentRequest(commitMessage, encode(newContent), existingBlobSha, branch))
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    /** At most one PR should ever be open for a given head branch. */
+    public Optional<PullRequest> findOpenPrByBranch(String branch) {
+        List<PullRequest> prs = findPrsByBranch(branch, "open");
+        return prs.isEmpty() ? Optional.empty() : Optional.of(prs.get(0));
+    }
+
+    /**
+     * Closed PRs can accumulate for the same branch name over time (we
+     * reuse branch names across runs), so callers that need "was any past
+     * PR on this branch about this exact value" should scan the full list.
+     */
+    public List<PullRequest> findPrsByBranch(String branch, String state) {
+        List<PullRequest> prs = restClient.get()
+                .uri(api("/pulls?head=" + owner + ":" + branch + "&state=" + state))
+                .headers(this::authHeaders)
+                .retrieve()
+                .body(new ParameterizedTypeReference<List<PullRequest>>() {
+                });
+        return prs == null ? List.of() : prs;
+    }
+
+    public PullRequest createPr(String branch, String base, String title, String body) {
+        return restClient.post()
+                .uri(api("/pulls"))
+                .headers(this::authHeaders)
+                .body(new CreatePrRequest(title, body, branch, base))
+                .retrieve()
+                .body(PullRequest.class);
+    }
+
+    public void updatePr(long number, String title, String body) {
+        restClient.patch()
+                .uri(api("/pulls/" + number))
+                .headers(this::authHeaders)
+                .body(new UpdatePrRequest(title, body))
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    public void closePr(long number) {
+        restClient.patch()
+                .uri(api("/pulls/" + number))
+                .headers(this::authHeaders)
+                .body(new ClosePrRequest("closed"))
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    public void ensureLabelExists(String name) {
+        boolean exists = restClient.get()
+                .uri(api("/labels/" + name))
+                .headers(this::authHeaders)
+                .exchange((req, resp) -> resp.getStatusCode().is2xxSuccessful());
+
+        if (!exists) {
+            restClient.post()
+                    .uri(api("/labels"))
+                    .headers(this::authHeaders)
+                    .body(new CreateLabelRequest(name, "5319e7", "Opened by homelab-watchman"))
+                    .retrieve()
+                    .toBodilessEntity();
+        }
+    }
+
+    public void addLabel(long issueNumber, String label) {
+        restClient.post()
+                .uri(api("/issues/" + issueNumber + "/labels"))
+                .headers(this::authHeaders)
+                .body(new AddLabelsRequest(List.of(label)))
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    public void addComment(long issueNumber, String comment) {
+        restClient.post()
+                .uri(api("/issues/" + issueNumber + "/comments"))
+                .headers(this::authHeaders)
+                .body(new AddCommentRequest(comment))
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    private String api(String path) {
+        return "https://api.github.com/repos/" + owner + "/" + repo + path;
+    }
+
+    private void authHeaders(HttpHeaders headers) {
+        headers.setBearerAuth(token);
+        headers.set("Accept", "application/vnd.github+json");
+    }
+
+    private static String decode(String base64) {
+        return new String(Base64.getMimeDecoder().decode(base64), StandardCharsets.UTF_8);
+    }
+
+    private static String encode(String content) {
+        return Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public record FileContent(String content, String sha) {
+    }
+
+    public record PullRequest(long number, String state, String title, @JsonProperty("html_url") String htmlUrl) {
+    }
+
+    private record RefResponse(RefObject object) {
+    }
+
+    private record RefObject(String sha) {
+    }
+
+    private record CreateRefRequest(String ref, String sha) {
+    }
+
+    private record UpdateRefRequest(String sha, boolean force) {
+    }
+
+    private record ContentResponse(String content, String sha) {
+    }
+
+    private record PutContentRequest(String message, String content, String sha, String branch) {
+    }
+
+    private record CreatePrRequest(String title, String body, String head, String base) {
+    }
+
+    private record UpdatePrRequest(String title, String body) {
+    }
+
+    private record ClosePrRequest(String state) {
+    }
+
+    private record AddLabelsRequest(List<String> labels) {
+    }
+
+    private record CreateLabelRequest(String name, String color, String description) {
+    }
+
+    private record AddCommentRequest(String body) {
+    }
+}

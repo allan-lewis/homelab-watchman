@@ -3,6 +3,7 @@ package com.allanlewis.homelabwatchman.persist;
 import com.allanlewis.homelabwatchman.plan.ProposedUpdate;
 import com.allanlewis.homelabwatchman.plan.UpdatePlanner;
 import com.allanlewis.homelabwatchman.scan.CandidateDependency;
+import com.allanlewis.homelabwatchman.vcs.PullRequestClient.PrOutcome;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,13 @@ public class DependencyStateWriter {
     }
 
     public void save(List<CandidateDependency> candidates, Map<CandidateDependency, ProposedUpdate> byCandidate) {
+        save(candidates, byCandidate, Map.of());
+    }
+
+    public void save(
+            List<CandidateDependency> candidates,
+            Map<CandidateDependency, ProposedUpdate> byCandidate,
+            Map<CandidateDependency, PrOutcome> prOutcomesByCandidate) {
         Instant now = Instant.now();
 
         for (CandidateDependency candidate : candidates) {
@@ -41,6 +49,14 @@ public class DependencyStateWriter {
             state.setLatestKnownValue(update != null ? update.newText() : current);
             state.setUpdateKind(update != null ? update.kind() : null);
             state.setLastCheckedAt(now);
+
+            PrOutcome prOutcome = prOutcomesByCandidate.get(candidate);
+            if (prOutcome != null) {
+                state.setLastPrStatus(prOutcome.status().name());
+                if (prOutcome.prUrl() != null) {
+                    state.setLastPrUrl(prOutcome.prUrl());
+                }
+            }
 
             repository.save(state);
         }

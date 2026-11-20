@@ -11,9 +11,12 @@ import com.allanlewis.homelabwatchman.plan.UpdateKind;
 import com.allanlewis.homelabwatchman.plan.UpdatePlanner;
 import com.allanlewis.homelabwatchman.scan.CandidateDependency;
 import com.allanlewis.homelabwatchman.scan.DependencyExtractor;
+import com.allanlewis.homelabwatchman.vcs.PullRequestClient;
+import com.allanlewis.homelabwatchman.vcs.PullRequestClient.PrOutcome;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -24,7 +27,9 @@ import org.springframework.stereotype.Component;
 /**
  * Entry point for `java -jar homelab-watchman.jar scan --repo <path>`.
  * Dry-run by default: reports what would change, opens nothing. --apply
- * will gate the real PR-opening behavior once ai/vcs are implemented.
+ * drafts PR text via AI and actually reconciles PRs via vcs (idempotent:
+ * creates, updates an existing one in place, skips a previously-rejected
+ * target, or no-ops if already current).
  *
  * Default output is one concise line per candidate in scope: "no-op", a
  * bare old->new version, or "digest refresh". --verbose/-v instead prints
@@ -40,6 +45,7 @@ public class ScanCommand implements CommandLineRunner {
     private final DependencyStateWriter dependencyStateWriter;
     private final ScanMetricsRecorder metricsRecorder;
     private final PrTextGenerator prTextGenerator;
+    private final PullRequestClient pullRequestClient;
     private final Path metricsOutputPath;
 
     public ScanCommand(
@@ -49,6 +55,7 @@ public class ScanCommand implements CommandLineRunner {
             DependencyStateWriter dependencyStateWriter,
             ScanMetricsRecorder metricsRecorder,
             PrTextGenerator prTextGenerator,
+            PullRequestClient pullRequestClient,
             @Value("${homelab.watchman.metrics.output-path}") String metricsOutputPath) {
         this.extractors = extractors;
         this.updatePlanner = updatePlanner;
@@ -56,13 +63,14 @@ public class ScanCommand implements CommandLineRunner {
         this.dependencyStateWriter = dependencyStateWriter;
         this.metricsRecorder = metricsRecorder;
         this.prTextGenerator = prTextGenerator;
+        this.pullRequestClient = pullRequestClient;
         this.metricsOutputPath = Path.of(metricsOutputPath);
     }
 
     @Override
     public void run(String... args) {
         if (args.length == 0 || !"scan".equals(args[0])) {
-            System.out.println("Usage: scan --repo <path> [--apply] [-v|--verbose]");
+            System.out.println("Usage: scan --repo <path> [--apply] [-v|--verbose] [--only <identifier>]");
             return;
         }
 
@@ -70,12 +78,14 @@ public class ScanCommand implements CommandLineRunner {
         Path repoRoot = parseRepoArg(args);
         boolean apply = argList.contains("--apply");
         boolean verbose = argList.contains("-v") || argList.contains("--verbose");
+        String only = parseOptionalArg(args, "--only");
 
         ScanRun scanRun = new ScanRun();
         scanRun.setStartedAt(Instant.now());
 
         List<CandidateDependency> candidates = extractors.stream()
                 .flatMap(extractor -> extractor.extract(repoRoot).stream())
+                .filter(c -> only == null || c.identifier().equals(only))
                 .toList();
 
         List<ProposedUpdate> updates = updatePlanner.plan(candidates);
@@ -94,39 +104,70 @@ public class ScanCommand implements CommandLineRunner {
         System.out.printf("%d version bump(s), %d digest refresh(es), %d up to date%n",
                 versionBumps, digestRefreshes, noOps);
 
+        Map<CandidateDependency, PrOutcome> prOutcomes = Map.of();
+        int prsOpened = 0;
+
         if (!updates.isEmpty()) {
             if (apply) {
-                draftPrText(updates);
+                prOutcomes = reconcileAll(repoRoot, updates);
+                prsOpened = (int) prOutcomes.values().stream()
+                        .filter(o -> o.status() == PrOutcome.Status.CREATED)
+                        .count();
             } else {
-                System.out.println("Pass --apply to draft PR text for these updates "
-                        + "(opening the PRs themselves is not yet implemented).");
+                System.out.println("Pass --apply to draft PR text and open/update PRs for these updates.");
             }
         }
 
-        dependencyStateWriter.save(candidates, byCandidate);
+        dependencyStateWriter.save(candidates, byCandidate, prOutcomes);
 
         scanRun.setFinishedAt(Instant.now());
         scanRun.setCandidatesFound(candidates.size());
-        scanRun.setPrsOpened(0);
+        scanRun.setPrsOpened(prsOpened);
         scanRunRepository.save(scanRun);
 
         Map<UpdateKind, Long> countsByKind = updates.stream()
                 .collect(Collectors.groupingBy(ProposedUpdate::kind, Collectors.counting()));
         metricsRecorder.recordCandidatesByKind(countsByKind);
-        metricsRecorder.recordPrsOpened(0);
+        metricsRecorder.recordPrsOpened(prsOpened);
         metricsRecorder.writeTo(metricsOutputPath);
     }
 
-    private void draftPrText(List<ProposedUpdate> updates) {
+    private Map<CandidateDependency, PrOutcome> reconcileAll(Path repoRoot, List<ProposedUpdate> updates) {
+        Map<CandidateDependency, PrOutcome> outcomes = new LinkedHashMap<>();
+
         System.out.println();
-        System.out.println("Drafting PR text (opening PRs is not yet implemented):");
+        System.out.println("Reconciling PRs:");
         for (ProposedUpdate update : updates) {
-            PrText text = prTextGenerator.generate(update);
             System.out.println();
-            System.out.println(update.candidate().identifier() + ":");
+            try {
+                reconcileOne(repoRoot, update, outcomes);
+            } catch (RuntimeException e) {
+                // One dependency's GitHub/AI call failing (rate limit, transient
+                // API error, etc.) shouldn't abort every other update in this run.
+                System.out.println(update.candidate().identifier() + ": FAILED - " + e.getMessage());
+            }
+        }
+
+        return outcomes;
+    }
+
+    private void reconcileOne(Path repoRoot, ProposedUpdate update, Map<CandidateDependency, PrOutcome> outcomes) {
+        PrOutcome predicted = pullRequestClient.checkStatus(repoRoot, update);
+        PrOutcome outcome = predicted;
+
+        System.out.print(update.candidate().identifier() + ": " + predicted.status());
+
+        if (predicted.status() == PrOutcome.Status.CREATED || predicted.status() == PrOutcome.Status.UPDATED) {
+            PrText text = prTextGenerator.generate(update);
+            outcome = pullRequestClient.apply(repoRoot, update, text);
+            System.out.println(" " + outcome.prUrl());
             System.out.println("  title: " + text.title());
             System.out.println("  body:  " + text.body());
+        } else {
+            System.out.println(predicted.prUrl() != null ? " " + predicted.prUrl() : "");
         }
+
+        outcomes.put(update.candidate(), outcome);
     }
 
     private void printLine(CandidateDependency candidate, ProposedUpdate update, boolean verbose) {
@@ -148,11 +189,19 @@ public class ScanCommand implements CommandLineRunner {
     }
 
     private Path parseRepoArg(String[] args) {
+        String repo = parseOptionalArg(args, "--repo");
+        if (repo == null) {
+            throw new IllegalArgumentException("missing required --repo <path>");
+        }
+        return Path.of(repo);
+    }
+
+    private String parseOptionalArg(String[] args, String name) {
         for (int i = 0; i < args.length - 1; i++) {
-            if ("--repo".equals(args[i])) {
-                return Path.of(args[i + 1]);
+            if (name.equals(args[i])) {
+                return args[i + 1];
             }
         }
-        throw new IllegalArgumentException("missing required --repo <path>");
+        return null;
     }
 }
