@@ -130,10 +130,29 @@ public class GitHubApi {
     }
 
     public void closePr(long number) {
+        setPrState(number, "closed");
+    }
+
+    /**
+     * Force-updating a branch ref via this low-level Git Data API (as
+     * createOrResetBranch does) does NOT trigger GitHub's normal PR
+     * "synchronize" event the way a real `git push --force` does - an
+     * already-open PR's cached head/diff/changed_files silently goes
+     * stale and stays that way indefinitely (confirmed live: still stale
+     * after 25+ seconds). Closing and reopening the PR is the standard
+     * workaround; it forces GitHub to recompute against the real current
+     * branch tip. Call after resetting a branch under an open PR.
+     */
+    public void resyncPr(long number) {
+        setPrState(number, "closed");
+        setPrState(number, "open");
+    }
+
+    private void setPrState(long number, String state) {
         restClient.patch()
                 .uri(api("/pulls/" + number))
                 .headers(this::authHeaders)
-                .body(new ClosePrRequest("closed"))
+                .body(new SetPrStateRequest(state))
                 .retrieve()
                 .toBodilessEntity();
     }
@@ -286,7 +305,7 @@ public class GitHubApi {
     private record UpdatePrRequest(String title, String body) {
     }
 
-    private record ClosePrRequest(String state) {
+    private record SetPrStateRequest(String state) {
     }
 
     private record AddLabelsRequest(List<String> labels) {

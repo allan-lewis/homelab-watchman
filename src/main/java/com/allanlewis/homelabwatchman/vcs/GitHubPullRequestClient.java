@@ -58,6 +58,11 @@ public class GitHubPullRequestClient implements PullRequestClient {
         PrOutcome outcome;
         if (openPr.isPresent()) {
             api.updatePr(openPr.get().number(), text.title(), text.body());
+            // The ref reset above doesn't trigger GitHub's PR synchronize
+            // event (confirmed live - the diff stayed stale indefinitely
+            // without this), so force a resync or reviewers would see a
+            // stale diff for an already-open PR we just updated in place.
+            api.resyncPr(openPr.get().number());
             outcome = new PrOutcome(Status.UPDATED, openPr.get().htmlUrl());
         } else {
             GitHubApi.PullRequest pr = api.createPr(branch, baseBranch, text.title(), text.body());

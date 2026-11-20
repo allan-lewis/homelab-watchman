@@ -61,13 +61,27 @@ public class UpdatePlanner {
                 ociRegistryClient.listTags(candidate.identifier()), candidate.currentValue());
 
         if (newerTag.isPresent()) {
+            // Re-pin a digest for the new tag too, matching both Renovate's
+            // own behavior and every other image ref in this repo (always
+            // tag+digest). Skipping this is what caused the
+            // homepage/nginx/seerr bug: a version bump that wrote a bare
+            // tag left nothing for the next scan to compare a digest
+            // against, which looked identical to "the digest changed".
+            // Resolving here applies even if the candidate had no digest
+            // pinned before, so an unpinned dependency becomes pinned again
+            // the next time it gets a real version bump.
+            String newText = candidate.identifier() + ":" + newerTag.get();
+            Optional<String> newDigest = ociRegistryClient.resolveDigest(candidate.identifier(), newerTag.get());
+            if (newDigest.isPresent()) {
+                newText = newText + "@" + newDigest.get();
+            }
+
             // No reliable way to map an arbitrary OCI image (e.g.
             // ghcr.io/linuxserver/sonarr) to its upstream changelog in this
             // MVP, so releaseNotesUrl/releaseNotes stay null here - the AI
             // prompt is written to handle that honestly rather than guess.
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.VERSION_BUMP,
-                    describeCurrent(candidate), candidate.identifier() + ":" + newerTag.get(),
-                    null, null, newerTag.get()));
+                    describeCurrent(candidate), newText, null, null, newerTag.get()));
         }
 
         // currentDigest() == null means the file never pinned a digest at
