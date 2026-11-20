@@ -21,6 +21,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework:spring-web")
+    implementation("org.springframework.boot:spring-boot-starter-json")
     runtimeOnly("com.h2database:h2")
 
     implementation(platform("org.springframework.ai:spring-ai-bom:2.0.0"))
