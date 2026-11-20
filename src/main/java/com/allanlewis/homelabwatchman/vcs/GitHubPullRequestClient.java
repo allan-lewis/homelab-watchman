@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class GitHubPullRequestClient implements PullRequestClient {
 
-    private static final String LABEL = "homelab-watchman";
+    private static final String LABEL = "watchman";
 
     private final GitHubApi api;
     private final String baseBranch;
