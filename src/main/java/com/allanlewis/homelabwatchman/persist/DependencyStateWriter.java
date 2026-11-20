@@ -6,8 +6,6 @@ import com.allanlewis.homelabwatchman.scan.CandidateDependency;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,13 +24,7 @@ public class DependencyStateWriter {
         this.updatePlanner = updatePlanner;
     }
 
-    public void save(List<CandidateDependency> candidates, List<ProposedUpdate> updates) {
-        // mergeFunction (a, b) -> a: candidates compare equal only when
-        // identifier/file/value/digest are all identical (e.g. twingate's
-        // duplicated container block), so either side is an identical update.
-        Map<CandidateDependency, ProposedUpdate> byCandidate = updates.stream()
-                .collect(Collectors.toMap(ProposedUpdate::candidate, Function.identity(), (a, b) -> a));
-
+    public void save(List<CandidateDependency> candidates, Map<CandidateDependency, ProposedUpdate> byCandidate) {
         Instant now = Instant.now();
 
         for (CandidateDependency candidate : candidates) {

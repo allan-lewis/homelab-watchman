@@ -23,6 +23,11 @@ import org.springframework.stereotype.Component;
  * Entry point for `java -jar homelab-watchman.jar scan --repo <path>`.
  * Dry-run by default: reports what would change, opens nothing. --apply
  * will gate the real PR-opening behavior once ai/vcs are implemented.
+ *
+ * Default output is one concise line per candidate in scope: "no-op", a
+ * bare old->new version, or "digest refresh". --verbose/-v instead prints
+ * full old/new refs (registry, tag, digest) for every candidate with a
+ * pending update.
  */
 @Component
 public class ScanCommand implements CommandLineRunner {
@@ -52,12 +57,14 @@ public class ScanCommand implements CommandLineRunner {
     @Override
     public void run(String... args) {
         if (args.length == 0 || !"scan".equals(args[0])) {
-            System.out.println("Usage: scan --repo <path> [--apply]");
+            System.out.println("Usage: scan --repo <path> [--apply] [-v|--verbose]");
             return;
         }
 
+        List<String> argList = Arrays.asList(args);
         Path repoRoot = parseRepoArg(args);
-        boolean apply = Arrays.asList(args).contains("--apply");
+        boolean apply = argList.contains("--apply");
+        boolean verbose = argList.contains("-v") || argList.contains("--verbose");
 
         ScanRun scanRun = new ScanRun();
         scanRun.setStartedAt(Instant.now());
@@ -66,24 +73,26 @@ public class ScanCommand implements CommandLineRunner {
                 .flatMap(extractor -> extractor.extract(repoRoot).stream())
                 .toList();
 
-        System.out.println(candidates.size() + " candidate dependencies found");
-
         List<ProposedUpdate> updates = updatePlanner.plan(candidates);
+        Map<CandidateDependency, ProposedUpdate> byCandidate = ProposedUpdate.index(updates);
 
-        if (updates.isEmpty()) {
-            System.out.println("Everything up to date.");
-        } else {
-            for (ProposedUpdate update : updates) {
-                System.out.printf("%-30s %-45s -> %-45s %s%n",
-                        update.kind(), update.oldText(), update.newText(), update.candidate().file());
-            }
-            if (!apply) {
-                System.out.println();
-                System.out.println(updates.size() + " update(s) found. --apply is not yet implemented.");
-            }
+        System.out.println(candidates.size() + " dependencies in scope");
+        for (CandidateDependency candidate : candidates) {
+            printLine(candidate, byCandidate.get(candidate), verbose);
         }
 
-        dependencyStateWriter.save(candidates, updates);
+        long versionBumps = updates.stream().filter(u -> u.kind() == UpdateKind.VERSION_BUMP).count();
+        long digestRefreshes = updates.stream().filter(u -> u.kind() == UpdateKind.DIGEST_REFRESH).count();
+        long noOps = candidates.size() - updates.size();
+
+        System.out.println();
+        System.out.printf("%d version bump(s), %d digest refresh(es), %d up to date%n",
+                versionBumps, digestRefreshes, noOps);
+        if (!updates.isEmpty() && !apply) {
+            System.out.println("--apply is not yet implemented.");
+        }
+
+        dependencyStateWriter.save(candidates, byCandidate);
 
         scanRun.setFinishedAt(Instant.now());
         scanRun.setCandidatesFound(candidates.size());
@@ -95,6 +104,24 @@ public class ScanCommand implements CommandLineRunner {
         metricsRecorder.recordCandidatesByKind(countsByKind);
         metricsRecorder.recordPrsOpened(0);
         metricsRecorder.writeTo(metricsOutputPath);
+    }
+
+    private void printLine(CandidateDependency candidate, ProposedUpdate update, boolean verbose) {
+        if (verbose) {
+            String status = update == null
+                    ? "no-op (" + updatePlanner.describeCurrent(candidate) + ")"
+                    : update.kind() + "  " + update.oldText() + " -> " + update.newText();
+            System.out.printf("%-30s %s%n", candidate.identifier(), status);
+            return;
+        }
+
+        String status = update == null
+                ? "no-op"
+                : switch (update.kind()) {
+                    case VERSION_BUMP -> update.oldBareVersion() + " -> " + update.newBareVersion();
+                    case DIGEST_REFRESH -> "digest refresh";
+                };
+        System.out.printf("%-30s %s%n", candidate.identifier(), status);
     }
 
     private Path parseRepoArg(String[] args) {
