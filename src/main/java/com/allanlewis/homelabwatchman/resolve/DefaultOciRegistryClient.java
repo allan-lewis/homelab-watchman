@@ -46,7 +46,13 @@ public class DefaultOciRegistryClient implements OciRegistryClient {
         String token = fetchToken(registry);
 
         List<String> allTags = new ArrayList<>();
-        String url = "https://" + registry.apiHost() + "/v2/" + registry.repositoryPath() + "/tags/list";
+        // Some repos (the Servarr apps, via arch-suffixed + nightly tags)
+        // have tens of thousands of tags at the default page size of 100,
+        // which silently ran past MAX_PAGES before reaching recent plain
+        // version tags - GHCR's listing order isn't chronological. GHCR
+        // (and lscr.io, which proxies it) honor a larger page size; falls
+        // back to whatever a registry's own default is if ignored.
+        String url = "https://" + registry.apiHost() + "/v2/" + registry.repositoryPath() + "/tags/list?n=1000";
 
         for (int page = 0; url != null && page < MAX_PAGES; page++) {
             String pageUrl = url;
