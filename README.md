@@ -21,7 +21,9 @@ two are always opened as separate PRs.
 
 ## Requirements
 
-- Java 25, Gradle — provided by `flake.nix` (`nix develop`)
+- Java 25 and Gradle 9 — on bellatrix these come from the `devops` NixOS
+  profile (`nixos/modules/java`) in allans-home-lab, same as Go/Rust. No
+  per-project dev shell needed.
 - Four secrets in Doppler (`homelab` project, `prd` config):
   - `HOMELAB_WATCHMAN_AI_API_KEY` — Anthropic API key (provider is pluggable;
     see architecture doc)
@@ -33,7 +35,6 @@ two are always opened as separate PRs.
 ## Running (MVP: manual CLI)
 
 ```
-nix develop
 doppler run --project homelab --config prd -- ./gradlew bootRun --args="scan --repo /path/to/allans-home-lab"
 ```
 
