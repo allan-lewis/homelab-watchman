@@ -45,7 +45,8 @@ public class NixImageRefExtractor implements DependencyExtractor {
         List<CandidateDependency> matches = new ArrayList<>();
         Matcher matcher = IMAGE_REF.matcher(content);
         while (matcher.find()) {
-            matches.add(new CandidateDependency(matcher.group(1), file, matcher.group(2), matcher.group(3)));
+            matches.add(new CandidateDependency(
+                    matcher.group(1), file, matcher.group(2), matcher.group(3), Ecosystem.OCI_IMAGE));
         }
         return matches;
     }

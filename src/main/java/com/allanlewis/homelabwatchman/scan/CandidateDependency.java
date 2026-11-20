@@ -10,6 +10,7 @@ public record CandidateDependency(
         String identifier,
         Path file,
         String currentValue,
-        String currentDigest
+        String currentDigest,
+        Ecosystem ecosystem
 ) {
 }

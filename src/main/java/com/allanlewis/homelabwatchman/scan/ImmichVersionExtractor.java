@@ -41,6 +41,6 @@ public class ImmichVersionExtractor implements DependencyExtractor {
             return List.of();
         }
 
-        return List.of(new CandidateDependency(IDENTIFIER, file, matcher.group(1), null));
+        return List.of(new CandidateDependency(IDENTIFIER, file, matcher.group(1), null, Ecosystem.GITHUB_RELEASE));
     }
 }

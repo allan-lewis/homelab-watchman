@@ -2,6 +2,7 @@ package com.allanlewis.homelabwatchman.ai;
 
 import com.allanlewis.homelabwatchman.plan.ProposedUpdate;
 import com.allanlewis.homelabwatchman.plan.UpdateKind;
+import com.allanlewis.homelabwatchman.scan.Ecosystem;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 
@@ -34,6 +35,12 @@ public class ChatClientPrTextGenerator implements PrTextGenerator {
               of the same version, low risk; version bump = a real version
               change, worth a quick look at any release notes given), and
               include the release notes link verbatim if one was given.
+            - If told this is a Terraform provider floor-constraint bump,
+              say explicitly that merging this alone does not upgrade
+              anything - the .terraform.lock.hcl stays on the old version
+              until a human runs `terraform init -upgrade`, which merging
+              this PR will now force to happen before any other terraform
+              command works against this root module.
             """;
 
     private final ChatClient chatClient;
@@ -61,6 +68,9 @@ public class ChatClientPrTextGenerator implements PrTextGenerator {
             prompt.append("Short digest: ").append(update.newDigestShort()).append('\n');
             prompt.append("Note: same version/tag, upstream rebuilt the image. "
                     + "No release notes apply.\n");
+        } else if (update.candidate().ecosystem() == Ecosystem.TERRAFORM_PROVIDER) {
+            prompt.append("Note: this is a Terraform provider floor-constraint bump, "
+                    + "not a lock file update. No release notes apply.\n");
         } else if (update.releaseNotes() != null && !update.releaseNotes().isBlank()) {
             prompt.append("Release notes URL: ").append(update.releaseNotesUrl()).append('\n');
             prompt.append("Release notes:\n").append(update.releaseNotes()).append('\n');
