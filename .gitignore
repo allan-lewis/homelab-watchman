@@ -7,3 +7,4 @@ out/
 metrics/*.prom
 *.db
 .direnv/
+.logs/
