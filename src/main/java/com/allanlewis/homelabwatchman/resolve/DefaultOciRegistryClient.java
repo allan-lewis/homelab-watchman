@@ -90,10 +90,26 @@ public class DefaultOciRegistryClient implements OciRegistryClient {
 
     @Override
     public Optional<String> resolveDigest(String repository, String tag) {
+        return resolveAmd64Reference(repository, tag);
+    }
+
+    @Override
+    public Optional<String> normalizeDigest(String repository, String digest) {
+        return resolveAmd64Reference(repository, digest);
+    }
+
+    /**
+     * The manifest endpoint accepts a tag or a digest interchangeably as
+     * {reference} - same lookup either way, just a different starting
+     * point (a tag resolves to whatever it currently points at; a digest
+     * is already pinned, so this just normalizes it to its amd64 child if
+     * it turns out to be an index).
+     */
+    private Optional<String> resolveAmd64Reference(String repository, String reference) {
         Registry registry = Registry.parse(repository);
         String token = fetchToken(registry);
 
-        String url = "https://" + registry.apiHost() + "/v2/" + registry.repositoryPath() + "/manifests/" + tag;
+        String url = "https://" + registry.apiHost() + "/v2/" + registry.repositoryPath() + "/manifests/" + reference;
 
         return restClient.get()
                 .uri(url)

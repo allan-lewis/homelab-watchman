@@ -96,8 +96,21 @@ public class UpdatePlanner {
             return Optional.empty();
         }
 
+        // The pinned digest might itself be an un-normalized index digest
+        // (e.g. set by Renovate, or by this tool before this normalization
+        // existed) - comparing it raw against a freshly-resolved amd64
+        // digest looks like a change even when the image is identical.
+        // Confirmed live: sonarr and it-tools both had an index digest
+        // pinned whose own amd64 child digest exactly matched the "new"
+        // value this planner was about to propose as a refresh.
+        Optional<String> normalizedCurrentDigest =
+                ociRegistryClient.normalizeDigest(candidate.identifier(), candidate.currentDigest());
+        if (normalizedCurrentDigest.isEmpty()) {
+            return Optional.empty();
+        }
+
         Optional<String> latestDigest = ociRegistryClient.resolveDigest(candidate.identifier(), candidate.currentValue());
-        if (latestDigest.isPresent() && !latestDigest.get().equals(candidate.currentDigest())) {
+        if (latestDigest.isPresent() && !latestDigest.get().equals(normalizedCurrentDigest.get())) {
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.DIGEST_REFRESH,
                     describeCurrent(candidate),
                     candidate.identifier() + ":" + candidate.currentValue() + "@" + latestDigest.get(),
