@@ -1,12 +1,21 @@
 package com.allanlewis.homelabwatchman.cli;
 
+import com.allanlewis.homelabwatchman.metrics.ScanMetricsRecorder;
+import com.allanlewis.homelabwatchman.persist.DependencyStateWriter;
+import com.allanlewis.homelabwatchman.persist.ScanRun;
+import com.allanlewis.homelabwatchman.persist.ScanRunRepository;
 import com.allanlewis.homelabwatchman.plan.ProposedUpdate;
+import com.allanlewis.homelabwatchman.plan.UpdateKind;
 import com.allanlewis.homelabwatchman.plan.UpdatePlanner;
 import com.allanlewis.homelabwatchman.scan.CandidateDependency;
 import com.allanlewis.homelabwatchman.scan.DependencyExtractor;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -20,10 +29,24 @@ public class ScanCommand implements CommandLineRunner {
 
     private final List<DependencyExtractor> extractors;
     private final UpdatePlanner updatePlanner;
+    private final ScanRunRepository scanRunRepository;
+    private final DependencyStateWriter dependencyStateWriter;
+    private final ScanMetricsRecorder metricsRecorder;
+    private final Path metricsOutputPath;
 
-    public ScanCommand(List<DependencyExtractor> extractors, UpdatePlanner updatePlanner) {
+    public ScanCommand(
+            List<DependencyExtractor> extractors,
+            UpdatePlanner updatePlanner,
+            ScanRunRepository scanRunRepository,
+            DependencyStateWriter dependencyStateWriter,
+            ScanMetricsRecorder metricsRecorder,
+            @Value("${homelab.watchman.metrics.output-path}") String metricsOutputPath) {
         this.extractors = extractors;
         this.updatePlanner = updatePlanner;
+        this.scanRunRepository = scanRunRepository;
+        this.dependencyStateWriter = dependencyStateWriter;
+        this.metricsRecorder = metricsRecorder;
+        this.metricsOutputPath = Path.of(metricsOutputPath);
     }
 
     @Override
@@ -36,6 +59,9 @@ public class ScanCommand implements CommandLineRunner {
         Path repoRoot = parseRepoArg(args);
         boolean apply = Arrays.asList(args).contains("--apply");
 
+        ScanRun scanRun = new ScanRun();
+        scanRun.setStartedAt(Instant.now());
+
         List<CandidateDependency> candidates = extractors.stream()
                 .flatMap(extractor -> extractor.extract(repoRoot).stream())
                 .toList();
@@ -46,18 +72,29 @@ public class ScanCommand implements CommandLineRunner {
 
         if (updates.isEmpty()) {
             System.out.println("Everything up to date.");
-            return;
+        } else {
+            for (ProposedUpdate update : updates) {
+                System.out.printf("%-30s %-45s -> %-45s %s%n",
+                        update.kind(), update.oldText(), update.newText(), update.candidate().file());
+            }
+            if (!apply) {
+                System.out.println();
+                System.out.println(updates.size() + " update(s) found. --apply is not yet implemented.");
+            }
         }
 
-        for (ProposedUpdate update : updates) {
-            System.out.printf("%-30s %-45s -> %-45s %s%n",
-                    update.kind(), update.oldText(), update.newText(), update.candidate().file());
-        }
+        dependencyStateWriter.save(candidates, updates);
 
-        if (!apply) {
-            System.out.println();
-            System.out.println(updates.size() + " update(s) found. --apply is not yet implemented.");
-        }
+        scanRun.setFinishedAt(Instant.now());
+        scanRun.setCandidatesFound(candidates.size());
+        scanRun.setPrsOpened(0);
+        scanRunRepository.save(scanRun);
+
+        Map<UpdateKind, Long> countsByKind = updates.stream()
+                .collect(Collectors.groupingBy(ProposedUpdate::kind, Collectors.counting()));
+        metricsRecorder.recordCandidatesByKind(countsByKind);
+        metricsRecorder.recordPrsOpened(0);
+        metricsRecorder.writeTo(metricsOutputPath);
     }
 
     private Path parseRepoArg(String[] args) {

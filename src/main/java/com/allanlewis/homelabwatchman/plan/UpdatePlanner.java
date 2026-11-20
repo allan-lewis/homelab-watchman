@@ -63,13 +63,13 @@ public class UpdatePlanner {
 
         if (newerTag.isPresent()) {
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.VERSION_BUMP,
-                    oldImageRef(candidate), candidate.identifier() + ":" + newerTag.get(), null));
+                    describeCurrent(candidate), candidate.identifier() + ":" + newerTag.get(), null));
         }
 
         Optional<String> latestDigest = ociRegistryClient.resolveDigest(candidate.identifier(), candidate.currentValue());
         if (latestDigest.isPresent() && !latestDigest.get().equals(candidate.currentDigest())) {
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.DIGEST_REFRESH,
-                    oldImageRef(candidate),
+                    describeCurrent(candidate),
                     candidate.identifier() + ":" + candidate.currentValue() + "@" + latestDigest.get(),
                     null));
         }
@@ -81,9 +81,17 @@ public class UpdatePlanner {
         return tag.replaceAll("\\d+", "#");
     }
 
-    private String oldImageRef(CandidateDependency candidate) {
-        return candidate.identifier() + ":" + candidate.currentValue()
-                + (candidate.currentDigest() != null ? "@" + candidate.currentDigest() : "");
+    /**
+     * The same granularity ProposedUpdate.oldText()/newText() use: full
+     * "repo:tag@digest" for OCI image refs, bare version string for
+     * GitHub-release-backed deps. Exposed so callers can describe a
+     * candidate's current state even when it has no pending update (e.g.
+     * for persisting full DependencyState coverage, not just deltas).
+     */
+    public String describeCurrent(CandidateDependency candidate) {
+        return candidate.currentDigest() != null
+                ? candidate.identifier() + ":" + candidate.currentValue() + "@" + candidate.currentDigest()
+                : candidate.currentValue();
     }
 
     private Optional<ProposedUpdate> planGitHubBackedVersion(CandidateDependency candidate) {
@@ -92,6 +100,6 @@ public class UpdatePlanner {
         return gitHubReleaseClient.latestReleaseTag(ownerRepo[0], ownerRepo[1])
                 .filter(tag -> !tag.equals(candidate.currentValue()))
                 .map(tag -> new ProposedUpdate(candidate, UpdateKind.VERSION_BUMP,
-                        candidate.currentValue(), tag, null));
+                        describeCurrent(candidate), tag, null));
     }
 }
