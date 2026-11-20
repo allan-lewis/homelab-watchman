@@ -1,5 +1,6 @@
 package com.allanlewis.homelabwatchman.resolve;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -24,6 +25,12 @@ import org.springframework.web.client.RestClient;
 public class DefaultOciRegistryClient implements OciRegistryClient {
 
     private static final Pattern AUTH_HEADER = Pattern.compile("realm=\"([^\"]+)\",service=\"([^\"]+)\"");
+    private static final Pattern NEXT_LINK = Pattern.compile("<([^>]+)>;\\s*rel=\"next\"");
+
+    // Registries like ghcr.io paginate tags/list at 100 per page, in
+    // registration order (not sorted) - a repo's newest tags can easily be
+    // on page 3+. Safety cap, not an expected ceiling.
+    private static final int MAX_PAGES = 50;
 
     private static final List<MediaType> MANIFEST_ACCEPT = List.of(
             MediaType.valueOf("application/vnd.oci.image.index.v1+json"),
@@ -38,15 +45,41 @@ public class DefaultOciRegistryClient implements OciRegistryClient {
         Registry registry = Registry.parse(repository);
         String token = fetchToken(registry);
 
+        List<String> allTags = new ArrayList<>();
         String url = "https://" + registry.apiHost() + "/v2/" + registry.repositoryPath() + "/tags/list";
 
-        TagsListResponse response = restClient.get()
-                .uri(url)
-                .headers(h -> h.setBearerAuth(token))
-                .retrieve()
-                .body(TagsListResponse.class);
+        for (int page = 0; url != null && page < MAX_PAGES; page++) {
+            String pageUrl = url;
+            Page result = restClient.get()
+                    .uri(pageUrl)
+                    .headers(h -> h.setBearerAuth(token))
+                    .exchange((request, response) -> new Page(
+                            response.bodyTo(TagsListResponse.class),
+                            response.getHeaders().getFirst(HttpHeaders.LINK)));
 
-        return response == null || response.tags() == null ? List.of() : response.tags();
+            if (result.body() != null && result.body().tags() != null) {
+                allTags.addAll(result.body().tags());
+            }
+
+            url = nextPageUrl(registry.apiHost(), result.linkHeader());
+        }
+
+        return allTags;
+    }
+
+    private String nextPageUrl(String apiHost, String linkHeader) {
+        if (linkHeader == null) {
+            return null;
+        }
+        Matcher matcher = NEXT_LINK.matcher(linkHeader);
+        if (!matcher.find()) {
+            return null;
+        }
+        String next = matcher.group(1);
+        return next.startsWith("http") ? next : "https://" + apiHost + next;
+    }
+
+    private record Page(TagsListResponse body, String linkHeader) {
     }
 
     @Override

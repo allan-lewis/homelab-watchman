@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,7 @@ public class UpdatePlanner {
     // Excludes arch-prefixed ("amd64-...") and branch-like ("latest", "main")
     // tags, which aren't comparable to a plain pinned version.
     private static final Pattern VERSION_LIKE = Pattern.compile("^v?\\d[0-9a-zA-Z.\\-]*$");
+    private static final Pattern DIGIT_RUN = Pattern.compile("\\d+|\\D+");
 
     private final OciRegistryClient ociRegistryClient;
     private final GitHubReleaseClient gitHubReleaseClient;
@@ -77,8 +79,24 @@ public class UpdatePlanner {
         return Optional.empty();
     }
 
+    /**
+     * Collapses digit runs to a same-length run of "#", preserving digit
+     * COUNT (not value). Plain "#" for every digit run was too loose: tag
+     * histories mix versioning schemes (e.g. lidarr's old "3.1.6" and a
+     * since-abandoned "8.1.2135" scheme, or transmission's leftover 2021
+     * date-stamped tags like "2021.11.18") that share shape "#.#.#" but
+     * represent incomparable epochs. Preserving run length tells "3.1.6"
+     * apart from "8.1.2135" (#.#.# vs #.#.####) and from "2021.11.18"
+     * (####.##.##) without needing per-tag publish timestamps.
+     */
     private static String skeleton(String tag) {
-        return tag.replaceAll("\\d+", "#");
+        StringBuilder skeleton = new StringBuilder();
+        Matcher matcher = DIGIT_RUN.matcher(tag);
+        while (matcher.find()) {
+            String token = matcher.group();
+            skeleton.append(Character.isDigit(token.charAt(0)) ? "#".repeat(token.length()) : token);
+        }
+        return skeleton.toString();
     }
 
     /**
