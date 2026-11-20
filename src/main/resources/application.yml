@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: homelab-watchman
+  datasource:
+    url: jdbc:h2:file:./data/homelab-watchman;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+  ai:
+    anthropic:
+      api-key: ${HOMELAB_WATCHMAN_AI_API_KEY:}
+      chat:
+        options:
+          model: claude-haiku-4-5
+
+homelab:
+  watchman:
+    github:
+      token: ${HOMELAB_WATCHMAN_GITHUB_TOKEN:}
+      repository: allan-lewis/allans-home-lab
+    ai:
+      provider: anthropic
+      model: claude-haiku-4-5
+    metrics:
+      output-path: ./metrics/homelab-watchman.prom
