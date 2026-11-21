@@ -100,6 +100,7 @@ public class GitHubPullRequestClient implements PullRequestClient {
                 api.addComment(openPr.get().number(),
                         "Closing: " + candidate.identifier() + " is already up to date on " + baseBranch + ".");
                 api.closePr(openPr.get().number());
+                api.deleteBranchIfExists(branch);
                 closed++;
             }
         }

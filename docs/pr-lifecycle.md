@@ -62,13 +62,15 @@ This exists because `allans-home-lab`'s "automatically delete head branches" rep
 
 ### Stale-PR cleanup for no-op candidates
 
-For every dependency that's `no-op` this run — meaning the planner looked and found nothing to propose — any still-open PR on *either* of its branches is stale by definition, no matter how it got that way.
+For every dependency that's `no-op` this run — meaning the planner looked and found nothing to propose — any still-open PR on *either* of its branches is stale by definition, no matter how it got that way. The branch is deleted immediately after the PR is closed, not left for `cleanupMergedBranches()` to find later — that sweep only ever looks at *merged* PRs, so a closed-without-merge branch from here would otherwise sit on the remote forever.
 
 ```
 twingate/connector: closed 1 stale PR(s) - already up to date.
 ```
 
 **This is the exact gap a real case fell into once.** `twingate/connector` had an open PR proposing a version bump that `main` had *already* picked up through a completely different path (a separate merge happened to include the same change). The scan correctly reported `no-op` for it — there was genuinely nothing left to propose — but nothing else would have gone back and closed the now-redundant open PR, because the normal reconcile loop only ever walks *pending* updates, and this dependency no longer had one. This sweep exists specifically to close that gap: it walks every candidate, not just the ones with something pending, and closes anything stale it finds.
+
+A second, separate real case found the matching gap on the branch side: a batch of PRs closed directly via the GitHub API (outside this sweep, outside `apply()` entirely) during the digest-normalization bug investigation left 10 orphaned `watchman/*` branches behind indefinitely, since neither cleanup sweep covers "PR closed, not merged, not through this code path." Those were deleted by hand; the fix above only guarantees *this* sweep's own closures clean up after themselves going forward, not closures from outside the tool.
 
 Both sweeps wrap each dependency in its own try/catch — a transient failure in cleanup for one dependency doesn't stop the sweep for the rest, or block the reconcile loop that follows.
 
