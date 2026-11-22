@@ -82,6 +82,8 @@ That merged-check used to be inferred rather than read directly — the logic wa
 
 Practically: if you close a PR without merging it, re-running `--apply` won't resurrect that *same* proposal. If a newer version comes out afterward, that's a different target — its title won't match the old one, so it gets proposed fresh, as normal.
 
+"The exact value" means different things for the two kinds, and matching the wrong one is a real bug this project hit once it started giving digest-refresh titles a fixed tag (see above): for `VERSION_BUMP` it's the new version/tag, which is genuinely unique per proposal; for `DIGEST_REFRESH` it's the tag's **own digest**, not the tag itself — the tag never changes across digest refreshes, so matching on it would treat one rejected digest as a standing rejection of every future rebuild of that tag, forever. Confirmed live on sonarr: rejecting a digest-refresh PR and then re-scanning while the upstream image hadn't rebuilt again correctly still reported `SKIPPED_REJECTED` (matching by digest); the fix is what stops a *different* future digest from being wrongly swallowed by that same rejection.
+
 ## Why we sometimes disagree with Renovate on digest, but never on version
 
 Renovate and this tool both watch most of the same dependencies here, and generally agree on which tag is "latest" — but can differ on the exact *digest* pinned for that tag, for two unrelated reasons.

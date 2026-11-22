@@ -145,12 +145,20 @@ public class GitHubPullRequestClient implements PullRequestClient {
      * remote base branch at all, which is a real, not-rare case: it's
      * exactly what happened testing this against a checkout sitting on a
      * feature branch a couple commits behind main.
+     *
+     * The marker checked for must uniquely identify *this* proposed value,
+     * not just the dependency. newBareVersion() is the tag for a
+     * DIGEST_REFRESH - invariant across every digest refresh for that tag -
+     * so matching on it would treat one rejected digest as a rejection of
+     * every future digest forever, now that titles always embed the tag.
+     * The digest itself is the only thing that actually varies.
      */
     private boolean wasPreviouslyRejected(String branch, ProposedUpdate update) {
+        String marker = update.kind() == UpdateKind.DIGEST_REFRESH ? update.newDigestShort() : update.newBareVersion();
         List<GitHubApi.PullRequest> closed = api.findPrsByBranch(branch, "closed");
         return closed.stream()
                 .filter(pr -> !pr.isMerged())
-                .anyMatch(pr -> pr.title() != null && pr.title().contains(update.newBareVersion()));
+                .anyMatch(pr -> pr.title() != null && pr.title().contains(marker));
     }
 
     private String branchName(String identifier, UpdateKind kind) {
