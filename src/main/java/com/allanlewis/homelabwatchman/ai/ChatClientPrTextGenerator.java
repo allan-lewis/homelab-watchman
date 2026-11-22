@@ -26,10 +26,9 @@ public class ChatClientPrTextGenerator implements PrTextGenerator {
               etc. unless the release notes actually say so.
             - Title, at most 72 characters:
               - VERSION_BUMP: "chore(deps): bump <name> from <old> to <new>"
-              - DIGEST_REFRESH: "chore(deps): update <name> digest to
-                <short digest>" using the short digest given below - never
-                phrase a digest refresh as "from X to X", since the
-                version/tag didn't change, only the digest did.
+              - DIGEST_REFRESH: title is overwritten afterward by
+                deterministic code to match Renovate's exact convention -
+                write any reasonable title here, it won't be used.
             - Body: 2-4 plain sentences. State what changed, note the risk
               implied by the update kind (digest refresh = routine rebuild
               of the same version, low risk; version bump = a real version
@@ -51,10 +50,23 @@ public class ChatClientPrTextGenerator implements PrTextGenerator {
 
     @Override
     public PrText generate(ProposedUpdate update) {
-        return chatClient.prompt()
+        PrText text = chatClient.prompt()
                 .user(buildUserPrompt(update))
                 .call()
                 .entity(PrText.class);
+
+        if (update.kind() == UpdateKind.DIGEST_REFRESH) {
+            // Built deterministically, not left to the model, so the only
+            // difference from Renovate's own digest-refresh title is the
+            // digest itself - confirmed byte-for-byte against its current
+            // "chore(deps): update <name>:<tag> docker digest to <short>"
+            // convention (observed live on sonarr PR #604).
+            String title = "chore(deps): update " + update.candidate().identifier() + ":" + update.oldBareVersion()
+                    + " docker digest to " + update.newDigestShort();
+            return new PrText(title, text.body());
+        }
+
+        return text;
     }
 
     private String buildUserPrompt(ProposedUpdate update) {

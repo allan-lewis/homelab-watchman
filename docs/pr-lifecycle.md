@@ -104,3 +104,14 @@ Renovate's Dependency Dashboard issue exposes this directly: every open PR gets 
 This tool has no such "already proposed, leave it alone" state — every run recomputes everything from scratch and force-pushes if anything changed, including a same-tag digest rotation. Neither behavior is wrong; they're different tradeoffs between staying maximally current and minimizing PR churn/review noise.
 
 **Confirmed live, repeatedly**: whenever Renovate's PR and ours differed only on digest (same tag), querying the registry directly for the current `linux/amd64` digest matched *ours* every time — Renovate's was a snapshot from an earlier point that it simply hadn't been asked to refresh. If you want Renovate to catch up on a specific PR, check its rebase box (or "rebase all open PRs").
+
+### Digest-refresh titles match Renovate's convention on purpose
+
+A `DIGEST_REFRESH` title is built deterministically in code
+(`ChatClientPrTextGenerator`), not left to the model, specifically so the
+only difference from Renovate's own title for the same change is the
+digest itself: `chore(deps): update <name>:<tag> docker digest to
+<short digest>`. Confirmed byte-for-byte against Renovate's live sonarr
+PR — identical string except for the 7-char digest. The model still
+writes the body; only the title is fixed, because getting it byte-exact
+isn't something worth leaving to chance across model calls.
