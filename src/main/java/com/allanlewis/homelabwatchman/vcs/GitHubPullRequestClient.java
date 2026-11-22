@@ -83,6 +83,21 @@ public class GitHubPullRequestClient implements PullRequestClient {
         int deleted = 0;
         for (long number : api.findMergedPrNumbers(LABEL)) {
             String branch = api.getPr(number).head().ref();
+
+            // Branch names are stable per (identifier, kind) and get reused
+            // by later proposals once a merged PR's branch is gone - a
+            // merged PR matches this search forever, so on every later run
+            // its head.ref() can point at a branch that now belongs to a
+            // brand new, currently open PR. Deleting that branch would
+            // auto-close the open PR as a GitHub side effect of removing
+            // its head ref - confirmed live: this destroyed a freshly
+            // created, legitimate sonarr digest-refresh PR. Never delete a
+            // branch that's currently in use by an open PR, no matter which
+            // merged PR historically used the same name.
+            if (api.findOpenPrByBranch(branch).isPresent()) {
+                continue;
+            }
+
             if (api.deleteBranchIfExists(branch)) {
                 deleted++;
             }
