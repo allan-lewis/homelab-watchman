@@ -30,9 +30,11 @@ Real examples from `allans-home-lab`:
 goauthentik/authentik: UNCHANGED https://github.com/allan-lewis/allans-home-lab/pull/585
 
 ghcr.io/linuxserver/radarr: UPDATED https://github.com/allan-lewis/allans-home-lab/pull/614
-  title: chore(deps): bump ghcr.io/linuxserver/radarr from 6.4.4 to 7.0.3
+  title: chore(deps): bump ghcr.io/linuxserver/radarr to 7.0.3
   body:  Updates the radarr container image from version 6.4.4 to 7.0.3. ...
 ```
+
+Titles for both kinds are built deterministically (not left to the model) and documented in `ChatClientPrTextGenerator.buildTitle()`. `VERSION_BUMP` deliberately drops the "from <old>" clause - whatever's currently pinned in the file isn't reliably "what's actually live" once a chain of superseded proposals has passed through it, and tracking that accurately just for a title isn't worth it. Only the target version is ever meaningful here; the body still describes the change in full, old value included, since that's where the nuance belongs.
 
 ### Why `UPDATED` needs an explicit resync step
 
