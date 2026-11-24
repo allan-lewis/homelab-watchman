@@ -103,15 +103,20 @@ compared as opaque tag strings instead):
   boundary (nginx going `1.31.9` → `1.31.10`, 1 digit → 2) has the *exact
   same* digit-length delta as the anomalies `skeleton()` exists to catch -
   confirmed live, missing a real Renovate-opened nginx update. Digit
-  length alone can't tell these apart; the value can, since a genuine
-  boundary crossing from incrementing is always exactly current+1 (`9` →
-  `10`, `99` → `100` - incrementing can never skip past a boundary), while
-  every known anomaly (lidarr's `6` → `2135`, transmission's `4` →
-  `2021.11.18`) is some much larger jump that only coincidentally also
-  grows the digit count by one. So a trailing-length mismatch is still
-  accepted when every *other* run matches (shape fully collapsed,
-  ignoring the trailing run's own length) **and** the trailing value is
-  exactly a unit increment of the current one.
+  length alone can't tell these apart; the value can. A genuine boundary
+  crossing only ever happens when the *current* value is already the
+  largest possible at its own digit length (`9`, `99`, `999`, ...) -
+  incrementing can't skip past a boundary, only land on it. Every known
+  anomaly (lidarr's `6` → `2135`, transmission's `4` → `2021.11.18`) fails
+  that check outright, since 4 and 6 are nowhere near 9 - that's what
+  actually distinguishes them, not the size of the jump.
+  Once the crossing itself is legitimate, *any* value one digit longer is
+  accepted, not just current+1: current=`9` accepts `10`, `11`, `12`, ...
+  equally, so a scan that lags behind by several releases (catching
+  `1.31.12` instead of the day `1.31.10` shipped) still finds the real
+  latest instead of getting stuck on the first post-boundary release.
+  Covered by `UpdatePlannerTest`, since the multi-release-lag case doesn't
+  reliably exist on the live registry to verify there.
 
 `VERSION_BUMP` for an OCI image also resolves and includes a digest for
 the *new* tag — not just the bare tag — matching both Renovate's own

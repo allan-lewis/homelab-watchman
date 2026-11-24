@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
@@ -154,7 +153,7 @@ public class UpdatePlanner {
      * "0.123.1-rc1") can out-sort the real update. See skeleton() for why
      * digit-run LENGTH also has to match, not just digit-run position.
      */
-    private Optional<String> findNewerSameShapeVersion(List<String> candidates, String currentValue) {
+    Optional<String> findNewerSameShapeVersion(List<String> candidates, String currentValue) {
         String currentSkeleton = skeleton(currentValue);
 
         return candidates.stream()
@@ -171,23 +170,39 @@ public class UpdatePlanner {
      * exact same digit-length delta as the anomalies skeleton() exists to
      * catch (lidarr's abandoned "6" -> "2135", transmission's leftover
      * "4" -> "2021.11.18") - confirmed live, missing a real Renovate-opened
-     * nginx update. Length alone can't tell these apart; the value can: a
-     * genuine boundary crossing is always exactly current+1 (9->10, 99->100
-     * - incrementing can never skip past a boundary), while every known
-     * anomaly is some much larger jump that only coincidentally also grows
-     * the digit count by one. So: allow a trailing-length mismatch only
-     * when every other run still matches (shape collapsed fully, ignoring
-     * the trailing run's length) AND the trailing value is exactly a unit
-     * increment.
+     * nginx update. Length alone can't tell these apart; the value can.
+     *
+     * A genuine boundary crossing only ever happens when the CURRENT value
+     * is already the largest possible at its own digit length (9, 99, 999,
+     * ...) - incrementing can't skip past a boundary, only land on it. Once
+     * that's true, every candidate one digit longer is a legitimate
+     * continuation of the same scheme, not just current+1: current=9
+     * accepts 10, 11, 12, ... equally, so a scan that lags behind by
+     * several releases (waiting until 1.31.12 is out instead of catching
+     * 1.31.10 the day it shipped) still finds the real latest, not just the
+     * first post-boundary release. Every known anomaly fails the "current
+     * is maxed out" check outright (4 and 6 are nowhere near 9), which is
+     * what actually distinguishes them from nginx's case - not the size of
+     * the jump itself. Crossing more than one boundary in a single scan
+     * (candidate two or more digits longer than current) isn't handled -
+     * vanishingly unlikely in practice, and self-resolves one boundary at a
+     * time over subsequent scans regardless.
      */
     private boolean isTrailingCarry(String candidate, String current) {
         if (!collapsedSkeleton(candidate).equals(collapsedSkeleton(current))) {
             return false;
         }
-        OptionalLong currentTrailing = lastDigitRunValue(current);
-        OptionalLong candidateTrailing = lastDigitRunValue(candidate);
-        return currentTrailing.isPresent() && candidateTrailing.isPresent()
-                && candidateTrailing.getAsLong() == currentTrailing.getAsLong() + 1;
+        Optional<String> currentTrailing = lastDigitRun(current);
+        Optional<String> candidateTrailing = lastDigitRun(candidate);
+        if (currentTrailing.isEmpty() || candidateTrailing.isEmpty()) {
+            return false;
+        }
+        int currentLength = currentTrailing.get().length();
+        if (candidateTrailing.get().length() != currentLength + 1) {
+            return false;
+        }
+        long maxAtCurrentLength = Long.parseLong("9".repeat(currentLength));
+        return Long.parseLong(currentTrailing.get()) == maxAtCurrentLength;
     }
 
     /** Like skeleton(), but collapses the trailing digit run too - used only to check every OTHER run still matches. */
@@ -201,7 +216,7 @@ public class UpdatePlanner {
         return skeleton.toString();
     }
 
-    private static OptionalLong lastDigitRunValue(String tag) {
+    private static Optional<String> lastDigitRun(String tag) {
         Matcher matcher = DIGIT_RUN.matcher(tag);
         String lastDigitRun = null;
         while (matcher.find()) {
@@ -210,7 +225,7 @@ public class UpdatePlanner {
                 lastDigitRun = token;
             }
         }
-        return lastDigitRun == null ? OptionalLong.empty() : OptionalLong.of(Long.parseLong(lastDigitRun));
+        return Optional.ofNullable(lastDigitRun);
     }
 
     /**
