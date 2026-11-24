@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
@@ -158,9 +159,58 @@ public class UpdatePlanner {
 
         return candidates.stream()
                 .filter(v -> VERSION_LIKE.matcher(v).matches())
-                .filter(v -> skeleton(v).equals(currentSkeleton))
+                .filter(v -> skeleton(v).equals(currentSkeleton) || isTrailingCarry(v, currentValue))
                 .max(versionComparator)
                 .filter(v -> versionComparator.compare(v, currentValue) > 0);
+    }
+
+    /**
+     * skeleton()'s exact-length requirement on the trailing run has a real
+     * blind spot: an entirely ordinary patch bump that crosses a power-of-
+     * ten boundary (nginx going 1.31.9 -> 1.31.10, 1 digit -> 2) has the
+     * exact same digit-length delta as the anomalies skeleton() exists to
+     * catch (lidarr's abandoned "6" -> "2135", transmission's leftover
+     * "4" -> "2021.11.18") - confirmed live, missing a real Renovate-opened
+     * nginx update. Length alone can't tell these apart; the value can: a
+     * genuine boundary crossing is always exactly current+1 (9->10, 99->100
+     * - incrementing can never skip past a boundary), while every known
+     * anomaly is some much larger jump that only coincidentally also grows
+     * the digit count by one. So: allow a trailing-length mismatch only
+     * when every other run still matches (shape collapsed fully, ignoring
+     * the trailing run's length) AND the trailing value is exactly a unit
+     * increment.
+     */
+    private boolean isTrailingCarry(String candidate, String current) {
+        if (!collapsedSkeleton(candidate).equals(collapsedSkeleton(current))) {
+            return false;
+        }
+        OptionalLong currentTrailing = lastDigitRunValue(current);
+        OptionalLong candidateTrailing = lastDigitRunValue(candidate);
+        return currentTrailing.isPresent() && candidateTrailing.isPresent()
+                && candidateTrailing.getAsLong() == currentTrailing.getAsLong() + 1;
+    }
+
+    /** Like skeleton(), but collapses the trailing digit run too - used only to check every OTHER run still matches. */
+    private static String collapsedSkeleton(String tag) {
+        Matcher matcher = DIGIT_RUN.matcher(tag);
+        StringBuilder skeleton = new StringBuilder();
+        while (matcher.find()) {
+            String token = matcher.group();
+            skeleton.append(Character.isDigit(token.charAt(0)) ? "#" : token);
+        }
+        return skeleton.toString();
+    }
+
+    private static OptionalLong lastDigitRunValue(String tag) {
+        Matcher matcher = DIGIT_RUN.matcher(tag);
+        String lastDigitRun = null;
+        while (matcher.find()) {
+            String token = matcher.group();
+            if (Character.isDigit(token.charAt(0))) {
+                lastDigitRun = token;
+            }
+        }
+        return lastDigitRun == null ? OptionalLong.empty() : OptionalLong.of(Long.parseLong(lastDigitRun));
     }
 
     /**

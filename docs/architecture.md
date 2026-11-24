@@ -98,6 +98,20 @@ compared as opaque tag strings instead):
     97 → 123 is 2 digits → 3 digits, nothing to do with versioning scheme).
   - Only the trailing/patch segment turning out a wildly different length
     is the actual anomaly signal in every real case seen so far.
+- `isTrailingCarry` — the exact-length rule above has its own real blind
+  spot: an entirely ordinary patch bump that crosses a power-of-ten
+  boundary (nginx going `1.31.9` → `1.31.10`, 1 digit → 2) has the *exact
+  same* digit-length delta as the anomalies `skeleton()` exists to catch -
+  confirmed live, missing a real Renovate-opened nginx update. Digit
+  length alone can't tell these apart; the value can, since a genuine
+  boundary crossing from incrementing is always exactly current+1 (`9` →
+  `10`, `99` → `100` - incrementing can never skip past a boundary), while
+  every known anomaly (lidarr's `6` → `2135`, transmission's `4` →
+  `2021.11.18`) is some much larger jump that only coincidentally also
+  grows the digit count by one. So a trailing-length mismatch is still
+  accepted when every *other* run matches (shape fully collapsed,
+  ignoring the trailing run's own length) **and** the trailing value is
+  exactly a unit increment of the current one.
 
 `VERSION_BUMP` for an OCI image also resolves and includes a digest for
 the *new* tag — not just the bare tag — matching both Renovate's own
