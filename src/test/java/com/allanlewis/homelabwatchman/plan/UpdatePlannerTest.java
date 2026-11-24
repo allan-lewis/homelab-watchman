@@ -1,8 +1,15 @@
 package com.allanlewis.homelabwatchman.plan;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import com.allanlewis.homelabwatchman.resolve.OciRegistryClient;
+import com.allanlewis.homelabwatchman.scan.CandidateDependency;
+import com.allanlewis.homelabwatchman.scan.Ecosystem;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -54,5 +61,35 @@ class UpdatePlannerTest {
         // to need an extra digit. Must still be rejected on its own, same
         // shape of problem as the transmission case but smaller numbers.
         assertThat(planner.findNewerSameShapeVersion(List.of("1.31.4", "1.31.10"), "1.31.4")).isEmpty();
+    }
+
+    @Test
+    void ociVersionBumpOldTextIncludesIdentifierEvenWithNoPriorDigest() {
+        // Regression test for the nginx 1.31.9 -> 1.31.10 bug: oldText must
+        // be the exact substring GitHubPullRequestClient will replace() out
+        // of the file ("identifier:tag"), not just the bare tag - otherwise
+        // the identifier ends up duplicated into the new "identifier:tag@
+        // digest" text.
+        OciRegistryClient registryClient = mock(OciRegistryClient.class);
+        when(registryClient.listTags("docker.io/library/nginx")).thenReturn(List.of("1.31.9", "1.31.10"));
+        when(registryClient.resolveDigest("docker.io/library/nginx", "1.31.10"))
+                .thenReturn(Optional.of("sha256:6a89681c1c2ec5850990e79e69d19f353fcbda343ca193a5e66d466f49ba2b15"));
+
+        UpdatePlanner ociPlanner = new UpdatePlanner(registryClient, null, null);
+        CandidateDependency candidate = new CandidateDependency(
+                "docker.io/library/nginx", Path.of("nginx.nix"), "1.31.9", null, Ecosystem.OCI_IMAGE);
+
+        List<ProposedUpdate> updates = ociPlanner.plan(List.of(candidate));
+
+        assertThat(updates).hasSize(1);
+        ProposedUpdate update = updates.get(0);
+        assertThat(update.oldText()).isEqualTo("docker.io/library/nginx:1.31.9");
+        assertThat(update.newText()).isEqualTo(
+                "docker.io/library/nginx:1.31.10@sha256:6a89681c1c2ec5850990e79e69d19f353fcbda343ca193a5e66d466f49ba2b15");
+
+        String fileLine = "    image = \"docker.io/library/nginx:1.31.9\";";
+        assertThat(fileLine.replace(update.oldText(), update.newText())).isEqualTo(
+                "    image = \"docker.io/library/nginx:1.31.10@sha256:"
+                        + "6a89681c1c2ec5850990e79e69d19f353fcbda343ca193a5e66d466f49ba2b15\";");
     }
 }

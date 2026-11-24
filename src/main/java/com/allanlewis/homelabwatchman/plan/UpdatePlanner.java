@@ -76,12 +76,24 @@ public class UpdatePlanner {
                 newText = newText + "@" + newDigest.get();
             }
 
+            // oldText has to be the exact substring GitHubPullRequestClient
+            // will String.replace() out of the file, not describeCurrent()'s
+            // display-only text: describeCurrent() drops the identifier
+            // prefix whenever there was no pinned digest, but the .nix file
+            // always has it (image = "identifier:tag"), so replacing just
+            // the bare old tag left the identifier duplicated into the new
+            // "identifier:tag@digest" text - confirmed live on nginx's
+            // 1.31.9 -> 1.31.10 bump.
+            String oldText = candidate.currentDigest() != null
+                    ? candidate.identifier() + ":" + candidate.currentValue() + "@" + candidate.currentDigest()
+                    : candidate.identifier() + ":" + candidate.currentValue();
+
             // No reliable way to map an arbitrary OCI image (e.g.
             // ghcr.io/linuxserver/sonarr) to its upstream changelog in this
             // MVP, so releaseNotesUrl/releaseNotes stay null here - the AI
             // prompt is written to handle that honestly rather than guess.
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.VERSION_BUMP,
-                    describeCurrent(candidate), newText, null, null, newerTag.get()));
+                    oldText, newText, null, null, newerTag.get()));
         }
 
         // currentDigest() == null means the file never pinned a digest at
