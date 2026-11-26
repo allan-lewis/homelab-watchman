@@ -1,9 +1,11 @@
 package com.allanlewis.homelabwatchman.plan;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.allanlewis.homelabwatchman.resolve.GitHubReleaseClient;
 import com.allanlewis.homelabwatchman.resolve.OciRegistryClient;
 import com.allanlewis.homelabwatchman.scan.CandidateDependency;
 import com.allanlewis.homelabwatchman.scan.Ecosystem;
@@ -75,7 +77,13 @@ class UpdatePlannerTest {
         when(registryClient.resolveDigest("docker.io/library/nginx", "1.31.10"))
                 .thenReturn(Optional.of("sha256:6a89681c1c2ec5850990e79e69d19f353fcbda343ca193a5e66d466f49ba2b15"));
 
-        UpdatePlanner ociPlanner = new UpdatePlanner(registryClient, null, null);
+        // docker.io/library/nginx has a real OciImageRepositories mapping
+        // (nginx/nginx), so planOciImage will call this - stubbed empty
+        // since this test is about oldText/newText, not release notes.
+        GitHubReleaseClient gitHubReleaseClient = mock(GitHubReleaseClient.class);
+        when(gitHubReleaseClient.findMatchingRelease(any(), any(), any())).thenReturn(Optional.empty());
+
+        UpdatePlanner ociPlanner = new UpdatePlanner(registryClient, gitHubReleaseClient, null);
         CandidateDependency candidate = new CandidateDependency(
                 "docker.io/library/nginx", Path.of("nginx.nix"), "1.31.9", null, Ecosystem.OCI_IMAGE);
 

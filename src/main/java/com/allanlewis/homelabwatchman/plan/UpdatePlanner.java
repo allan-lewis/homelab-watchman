@@ -2,6 +2,7 @@ package com.allanlewis.homelabwatchman.plan;
 
 import com.allanlewis.homelabwatchman.resolve.GitHubReleaseClient;
 import com.allanlewis.homelabwatchman.resolve.NaturalVersionComparator;
+import com.allanlewis.homelabwatchman.resolve.OciImageRepositories;
 import com.allanlewis.homelabwatchman.resolve.OciRegistryClient;
 import com.allanlewis.homelabwatchman.resolve.TerraformRegistryClient;
 import com.allanlewis.homelabwatchman.scan.CandidateDependency;
@@ -88,12 +89,10 @@ public class UpdatePlanner {
                     ? candidate.identifier() + ":" + candidate.currentValue() + "@" + candidate.currentDigest()
                     : candidate.identifier() + ":" + candidate.currentValue();
 
-            // No reliable way to map an arbitrary OCI image (e.g.
-            // ghcr.io/linuxserver/sonarr) to its upstream changelog in this
-            // MVP, so releaseNotesUrl/releaseNotes stay null here - the AI
-            // prompt is written to handle that honestly rather than guess.
+            OciChangelog changelog = resolveOciChangelog(candidate.identifier(), newerTag.get());
+
             return Optional.of(new ProposedUpdate(candidate, UpdateKind.VERSION_BUMP,
-                    oldText, newText, null, null, newerTag.get()));
+                    oldText, newText, changelog.url(), changelog.notes(), newerTag.get()));
         }
 
         // currentDigest() == null means the file never pinned a digest at
@@ -130,6 +129,34 @@ public class UpdatePlanner {
         }
 
         return Optional.empty();
+    }
+
+    /**
+     * OCI_IMAGE's identifier is a registry path, not reliably a GitHub
+     * repo - OciImageRepositories is the curated, verified exception list
+     * (confirmed live per entry, not guessed). Checkmk-style supplemental
+     * docs get appended to whatever notes (or lack of notes) the tag/
+     * release lookup found, never substituted for honesty about there
+     * being no real per-version changelog.
+     */
+    private OciChangelog resolveOciChangelog(String identifier, String newVersion) {
+        Optional<GitHubReleaseClient.Release> release = OciImageRepositories.githubRepoFor(identifier)
+                .map(repo -> repo.split("/", 2))
+                .flatMap(ownerRepo -> gitHubReleaseClient.findMatchingRelease(ownerRepo[0], ownerRepo[1], newVersion));
+
+        String url = release.map(GitHubReleaseClient.Release::url).orElse(null);
+        String notes = release.map(GitHubReleaseClient.Release::notes).orElse(null);
+
+        Optional<String> supplementalDocs = OciImageRepositories.supplementalDocsFor(identifier);
+        if (supplementalDocs.isPresent()) {
+            String supplementalLine = "Additional reference (not per-version release notes): " + supplementalDocs.get();
+            notes = notes == null || notes.isBlank() ? supplementalLine : notes + "\n\n" + supplementalLine;
+        }
+
+        return new OciChangelog(url, notes);
+    }
+
+    private record OciChangelog(String url, String notes) {
     }
 
     private Optional<ProposedUpdate> planGitHubBackedVersion(CandidateDependency candidate) {
